@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
 #ifndef CLIENT_H
 #define CLIENT_H
 

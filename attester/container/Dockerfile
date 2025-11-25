@@ -123,3 +123,8 @@ RUN apt-get update \
 
 WORKDIR ${OPTEE_DIR}
 USER ${USERNAME}:${USERNAME}
+
+# Set default build platform for Docker (QEMU)
+ENV PLATFORM=qemu
+ENV CFG_NXP_CAAM_ECC_DRV=n
+ENV CFG_VERAISON_ATTESTATION_PTA_TEST_KEY=y

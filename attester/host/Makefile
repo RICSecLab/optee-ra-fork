@@ -6,19 +6,22 @@ OBJCOPY ?= $(CROSS_COMPILE)objcopy
 OBJDUMP ?= $(CROSS_COMPILE)objdump
 READELF ?= $(CROSS_COMPILE)readelf
 
-OBJS = main.o
+OBJS = main.o client.o
+LIBS = rust-ffi/target/aarch64-unknown-linux-gnu/release/libveraison_client_ffi.a
 
-CFLAGS += -Wall -I../ta/include -I$(TEEC_EXPORT)/include -I./include
+CFLAGS += -Wall -I../ta/include -I$(TEEC_EXPORT)/include
+# Build-time define so TA headers choose TEEC_UUID on host side
+CFLAGS += -DHOST_BUILD=1
 #Add/link other required libraries here
 LDADD += -lteec -L$(TEEC_EXPORT)/lib
 
-BINARY = optee_remote_attestation
+BINARY = optee_example_veraison_attestation
 
 .PHONY: all
 all: $(BINARY)
 
-$(BINARY): $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $< $(LDADD)
+$(BINARY): $(OBJS) $(LIBS)
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS) $(LDADD) -lm
 
 .PHONY: clean
 clean:

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
 /*
  * The name of this file must not be modified
  */
@@ -6,9 +7,9 @@
 #define USER_TA_HEADER_DEFINES_H
 
 /* To get the TA UUID definition */
-#include <remote_attestation_ta.h>
+#include <veraison_attestation_ta.h>
 
-#define TA_UUID TA_REMOTE_ATTESTATION_UUID
+#define TA_UUID TA_VERAISON_ATTESTATION_UUID
 
 /*
  * TA properties: multi-instance TA, no specific attribute
