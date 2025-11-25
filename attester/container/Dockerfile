@@ -69,7 +69,7 @@ RUN groupadd -o --gid ${USER_GID} ${USERNAME} \
 
 # Install OP-TEE
 ENV OPTEE_DIR /optee
-ENV OPTEE_VERSION 3.21.0
+ENV OPTEE_VERSION 4.6.0
 RUN mkdir ${OPTEE_DIR} \
     && chown ${USERNAME}:${USERNAME} ${OPTEE_DIR}
 USER ${USERNAME}:${USERNAME}
