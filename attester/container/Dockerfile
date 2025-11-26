@@ -47,6 +47,7 @@ RUN apt-get update \
         python3-pip \
         python3-pyelftools \
         python3-serial \
+        python3-tomli \
         python-is-python3 \
         repo \
         rsync \

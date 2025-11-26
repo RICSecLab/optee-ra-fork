@@ -29,9 +29,9 @@ echo "Docker image ${IMAGE_NAME}:${TAG} has been successfully built."
 echo "Running Docker container..."
 docker run --rm -it \
            --entrypoint=bash \
-           -v "${SCRIPT_DIR}/../remote_attestation:/optee/optee_examples/remote_attestation" \
-           -v "${SCRIPT_DIR}/../pta_remote_attestation/remote_attestation:/optee/optee_os/core/pta/remote_attestation" \
-           -v "${SCRIPT_DIR}/../pta_remote_attestation/pta_remote_attestation.h:/optee/optee_os/lib/libutee/include/pta_remote_attestation.h" \
+           -v "${SCRIPT_DIR}/../host:/optee/optee_examples/veraison_attestation/host" \
+           -v "${SCRIPT_DIR}/../ta:/optee/optee_examples/veraison_attestation/ta" \
+           -v "${SCRIPT_DIR}/../pta:/optee/optee_os/core/pta/veraison_attestation" \
            --network veraison-net \
            ${IMAGE_NAME}:${TAG}
 

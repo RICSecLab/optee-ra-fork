@@ -1,6 +1,10 @@
 # OP-TEE Attester
 
-The Attester is a client that sends remote authentication requests to the Relying Party (Verifier). This client has a TEE (Trusted Execution Environment, namely Arm TrustZone) and runs on OP-TEE. The Attester is built on QEMU.
+The Attester is a client that sends remote authentication requests to the Relying Party (Verifier). This client has a TEE (Trusted Execution Environment, namely Arm TrustZone) and runs on OP-TEE.
+
+This attester now supports two platforms:
+- **QEMU**: Development environment with software crypto (see below)
+- **i.MX 8M Plus**: Production environment with CAAM hardware security (see [README-caam.md](README-caam.md) and [container-imx/README.md](container-imx/README.md))
 
 ![](../OPTEE-RA.png)
 

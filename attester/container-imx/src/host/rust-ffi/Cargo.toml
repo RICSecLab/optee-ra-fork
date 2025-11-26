@@ -1,0 +1,21 @@
+[package]
+name = "veraison_client_ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+
+[features]
+default = []
+# Build against real veraison_apiclient when available
+real = ["veraison_apiclient"]
+
+[dependencies]
+# Use vendored upstream Veraison API client to avoid network during Yocto builds
+# Place a checkout at host/rust-ffi/vendor/rust-apiclient
+veraison_apiclient = { package = "veraison-apiclient", path = "rust-apiclient", optional = true }
+libc = "0.2"
+tokio = { version = "1", features = ["rt", "time", "net"] }
+
+

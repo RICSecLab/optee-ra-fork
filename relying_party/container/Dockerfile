@@ -1,3 +1,8 @@
+FROM golang:1.23 AS go-builder
+
+# Install ear/arc tool
+RUN go install github.com/veraison/ear/arc@latest
+
 FROM ubuntu:22.04
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -7,11 +12,14 @@ RUN apt-get update \
         ca-certificates \
         curl \
         git \
-        golang-go \
         libssl-dev \
         make \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Go 1.23
+RUN curl -fsSL https://go.dev/dl/go1.23.3.linux-amd64.tar.gz | tar -C /usr/local -xzf -
+ENV PATH="/usr/local/go/bin:$PATH"
 
 # Create an user
 ARG USERNAME=user
@@ -25,13 +33,11 @@ ENV APP_DIR /app
 RUN mkdir ${APP_DIR} \
     && chown ${USERNAME}:${USERNAME} ${APP_DIR}
 
-# Install a tool to create, verify and display EAR attestation results
-USER ${USERNAME}:${USERNAME}
-RUN go install github.com/veraison/ear/arc@latest
-ENV PATH="/home/${USERNAME}/go/bin:$PATH"
+# Copy arc tool from builder
+COPY --from=go-builder /go/bin/arc /usr/local/bin/arc
+ENV PATH="/home/${USERNAME}/go/bin:/usr/local/bin:$PATH"
 
 # Install user's tools
-USER root:root
 RUN apt-get update \
     && apt-get -y install --no-install-suggests --no-install-recommends \
         clang-format \

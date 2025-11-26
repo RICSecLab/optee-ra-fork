@@ -1,0 +1,27 @@
+# Yocto build artifacts
+attester/container-imx/yocto
+attester/imx-docker/
+
+# External dependencies (clone separately as submodules)
+services/
+**/rust-ffi/coserv-rs/
+**/rust-ffi/rust-apiclient/
+
+# Build outputs
+*.o
+*.ta
+*.elf
+target/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+oe-logs
+oe-workdir
+
+# Temporary
+*.tmp
+*.swp
