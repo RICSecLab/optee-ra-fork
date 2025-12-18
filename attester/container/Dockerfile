@@ -47,6 +47,7 @@ RUN apt-get update \
         python3-pip \
         python3-pyelftools \
         python3-serial \
+        python3-tomli \
         python-is-python3 \
         repo \
         rsync \
@@ -69,7 +70,7 @@ RUN groupadd -o --gid ${USER_GID} ${USERNAME} \
 
 # Install OP-TEE
 ENV OPTEE_DIR /optee
-ENV OPTEE_VERSION 3.21.0
+ENV OPTEE_VERSION 4.6.0
 RUN mkdir ${OPTEE_DIR} \
     && chown ${USERNAME}:${USERNAME} ${OPTEE_DIR}
 USER ${USERNAME}:${USERNAME}
@@ -123,3 +124,8 @@ RUN apt-get update \
 
 WORKDIR ${OPTEE_DIR}
 USER ${USERNAME}:${USERNAME}
+
+# Set default build platform for Docker (QEMU)
+ENV PLATFORM=qemu
+ENV CFG_NXP_CAAM_ECC_DRV=n
+ENV CFG_VERAISON_ATTESTATION_PTA_TEST_KEY=y

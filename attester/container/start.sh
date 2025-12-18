@@ -27,12 +27,24 @@ docker build -t ${IMAGE_NAME}:${TAG} \
 echo "Docker image ${IMAGE_NAME}:${TAG} has been successfully built."
 
 echo "Running Docker container..."
+
+# Check if veraison-net network exists for Veraison server integration
+NETWORK_OPTS=""
+if docker network inspect veraison-net &> /dev/null; then
+    echo "Connecting to veraison-net network for Veraison server integration..."
+    NETWORK_OPTS="--network veraison-net"
+else
+    echo "Note: veraison-net not found. Running without Veraison server connection."
+    echo "      To enable Veraison integration, start Veraison services first."
+fi
+
 docker run --rm -it \
-           --entrypoint=bash \
-           -v "${SCRIPT_DIR}/../remote_attestation:/optee/optee_examples/remote_attestation" \
+           --entrypoint=/optee/entrypoint.sh \
+           ${NETWORK_OPTS} \
+           --name optee-attester-run \
+           -v "${SCRIPT_DIR}/..:/optee/optee_examples/remote_attestation" \
            -v "${SCRIPT_DIR}/../pta_remote_attestation/remote_attestation:/optee/optee_os/core/pta/remote_attestation" \
-           -v "${SCRIPT_DIR}/../pta_remote_attestation/pta_remote_attestation.h:/optee/optee_os/lib/libutee/include/pta_remote_attestation.h" \
-           --network veraison-net \
-           ${IMAGE_NAME}:${TAG}
+           -v "${SCRIPT_DIR}/entrypoint.sh:/optee/entrypoint.sh:ro" \
+           ${IMAGE_NAME}:${TAG} bash
 
 echo "Docker container has been successfully run."
