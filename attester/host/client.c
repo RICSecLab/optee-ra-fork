@@ -1,8 +1,18 @@
+// SPDX-License-Identifier: BSD-3-Clause
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "client.h"
+
+const char *get_server_base_url(void) {
+    const char *env_url = getenv("VERAISON_URL");
+    if (env_url != NULL && env_url[0] != '\0') {
+        return env_url;
+    }
+    return SERVER_BASE_URL_DEFAULT;
+}
 
 int find_psa_media_type_index(const ChallengeResponseSession *session) {
     for (int i = 0; i < session->accept_type_count; i++) {
@@ -15,7 +25,9 @@ int find_psa_media_type_index(const ChallengeResponseSession *session) {
 
 ChallengeResponseSession *open_session() {
     ChallengeResponseSession *session = NULL;
-    const char *base_url = SERVER_BASE_URL;
+    const char *base_url = get_server_base_url();
+
+    printf("Using Veraison server: %s\n", base_url);
 
     char new_session_endpoint[PATH_MAX] = {0};
     snprintf(new_session_endpoint, sizeof(new_session_endpoint),

@@ -3,7 +3,7 @@
 static const char base64_table[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-size_t base64_enc_len(size_t size) { return 4 * ((size + 2) / 3) + 1; }
+size_t pta_base64_enc_len(size_t size) { return 4 * ((size + 2) / 3) + 1; }
 
 /**
    base64 Encode a buffer (NUL terminated)
@@ -13,13 +13,13 @@ size_t base64_enc_len(size_t size) { return 4 * ((size + 2) / 3) + 1; }
    @param outlen  [in/out] The max size and resulting size
    @return 1 if successful
 */
-int base64_encode(const unsigned char *in, unsigned long inlen, char *out,
+int pta_base64_encode(const unsigned char *in, unsigned long inlen, char *out,
                   unsigned long *outlen) {
     size_t boffs = 0;
     const unsigned char *d = in;
     size_t n = 0;
 
-    n = base64_enc_len(inlen);
+    n = pta_base64_enc_len(inlen);
     if (*outlen < n) {
         *outlen = n;
         return 0;

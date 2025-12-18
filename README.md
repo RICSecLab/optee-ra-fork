@@ -208,14 +208,17 @@ Open another terminal, separate from the ones used in steps 4.1 and 4.2, and exe
 ./attester/container/launch_soc_term.sh secure
 ```
 
-#### 4.4. Building User-Added CA/TA/PTA, Starting QEMU, and Logging In
+#### 4.4. Building and Starting QEMU
 
-In the terminal started in step 4.1, execute the following command. This command edits `/optee/optee_os/core/pta/sub.mk` to add the line `subdirs-y += remote_attestation`, rebuilds the added application, and starts QEMU.
+In the terminal started in step 4.1, execute the following commands. This adds our `remote_attestation` PTA and starts the QEMU emulator.
 
 ```sh
+echo "" >> /optee/optee_os/core/pta/sub.mk
 echo "subdirs-y += remote_attestation" >> /optee/optee_os/core/pta/sub.mk
 make -C ${OPTEE_DIR}/build run CFG_REMOTE_ATTESTATION_PTA=y -j
 ```
+
+Note: Our `remote_attestation` PTA uses a different UUID (`7ccf76c3-4dfe-4310-bfd4-982f3a2fe9a2`) from the upstream `veraison_attestation` PTA, so both can coexist without conflict. The `CFG_REMOTE_ATTESTATION_PTA=y` flag enables the PTA compilation.
 
 Once QEMU has started, enter `c`.
 ```sh
@@ -240,38 +243,34 @@ optee_remote_attestation
 If executed correctly, you will get the following output on the normal world terminal.
 
 ```txt
-Opened new Veraison client session at http://relying-party-service:8087/challenge-response/v1/session/ed70cc0d-d141-11ee-9588-623338313838
+Opened new Veraison client session at https://verification-service:8080/challenge-response/v1/session/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
-Number of media types accepted: 7
-	application/vnd.parallaxsecond.key-attestation.cca
-	application/vnd.parallaxsecond.key-attestation.tpm
-	application/pem-certificate-chain
-	application/vnd.enacttrust.tpm-evidence
-	application/eat-collection; profile=http://arm.com/CCA-SSD/1.0.0
-	application/psa-attestation-token
-	application/eat-cwt; profile=http://arm.com/psa/2.0.0
+Number of media types accepted: 9
+        application/eat-collection; profile="http://arm.com/CCA-SSD/1.0.0"
+        application/vnd.parallaxsecond.key-attestation.cca
+        application/vnd.parallaxsecond.key-attestation.tpm
+        application/psa-attestation-token
+        application/eat-cwt; profile="http://arm.com/psa/2.0.0"
+        ...
 
 Nonce size: 32 bytes
-Nonce: [0x60, 0x48, 0xbd, 0x24, 0x55, 0xdb, 0x8a, 0x4, 0x6e, 0xcc, 0x7, 0x20, 0x40, 0x26, 0x87, 0xd0, 0x60, 0x72, 0xd, 0x95, 0x45, 0x57, 0x92, 0xa5, 0x36, 0xf4, 0x84, 0x52, 0xd5, 0xee, 0x5d, 0xbe]
+Nonce: [0xbd, 0x28, 0xef, ...]
 
 Completed opening the session.
-
 
 Invoke TA.
 Invoked TA successfully.
 
-
 Received evidence of CBOR (COSE) format from PTA.
 
 CBOR(COSE) size: 306
-CBOR(COSE): d28443a10126a058e7a71901097818687474703a2f2f61726d2e636f6d2f7073612f322e302e3019095a0119095b19300019095c582061636d652d696d706c656d656e746174696f6e2d69642d30303030303030303119095f81a3016450526f5402582031b805aa34f88df47e7cad4ee18c90b595180f49e15e1ec67e133412647ab607055820acbb11c7e4da217205523ce4ce1a245ae1a239ae3c6bfd9e7871f7e5d8bae86b0a58206048bd2455db8a046ecc0720402687d060720d95455792a536f48452d5ee5dbe190100582101ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f15085840fd39ee2aac4f64be2a58c1eca501ec1a3a7528f73bcbe8a90e7e1efda7e2cfce793fd28137c8a966793b605981fa677824867b22e21efcd6908338c4e3083b08
-
+CBOR(COSE): d28443a10126a0...
 
 Supplying the generated evidence to the server.
 
 Received the attestation result from the server.
 
-Raw attestation result (JWT): eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJlYXIudmVyaWZpZXItaWQiOnsiYnVpbGQiOiJOL0EiLCJkZXZlbG9wZXIiOiJWZXJhaXNvbiBQcm9qZWN0In0sImVhdF9ub25jZSI6IllFaTlKRlhiaWdSdXpBY2dRQ2FIMEdCeURaVkZWNUtsTnZTRVV0WHVYYjQ9IiwiZWF0X3Byb2ZpbGUiOiJ0YWc6Z2l0aHViLmNvbSwyMDIzOnZlcmFpc29uL2VhciIsImlhdCI6MTcwODU3OTE1OSwic3VibW9kcyI6eyJQU0FfSU9UIjp7ImVhci5hcHByYWlzYWwtcG9saWN5LWlkIjoicG9saWN5OlBTQV9JT1QiLCJlYXIuc3RhdHVzIjoiYWZmaXJtaW5nIiwiZWFyLnRydXN0d29ydGhpbmVzcy12ZWN0b3IiOnsiY29uZmlndXJhdGlvbiI6MCwiZXhlY3V0YWJsZXMiOjIsImZpbGUtc3lzdGVtIjowLCJoYXJkd2FyZSI6MiwiaW5zdGFuY2UtaWRlbnRpdHkiOjIsInJ1bnRpbWUtb3BhcXVlIjoyLCJzb3VyY2VkLWRhdGEiOjAsInN0b3JhZ2Utb3BhcXVlIjoyfSwiZWFyLnZlcmFpc29uLmFubm90YXRlZC1ldmlkZW5jZSI6eyJlYXQtcHJvZmlsZSI6Imh0dHA6Ly9hcm0uY29tL3BzYS8yLjAuMCIsInBzYS1jbGllbnQtaWQiOjEsInBzYS1pbXBsZW1lbnRhdGlvbi1pZCI6IllXTnRaUzFwYlhCc1pXMWxiblJoZEdsdmJpMXBaQzB3TURBd01EQXdNREU9IiwicHNhLWluc3RhbmNlLWlkIjoiQWM3cnJudUpKNk1pZmxNRHoxNFBIM3MwdTFRcTF5VUt3RCs4M2pic0x4VUkiLCJwc2Etbm9uY2UiOiJZRWk5SkZYYmlnUnV6QWNnUUNhSDBHQnlEWlZGVjVLbE52U0VVdFh1WGI0PSIsInBzYS1zZWN1cml0eS1saWZlY3ljbGUiOjEyMjg4LCJwc2Etc29mdHdhcmUtY29tcG9uZW50cyI6W3sibWVhc3VyZW1lbnQtdHlwZSI6IlBSb1QiLCJtZWFzdXJlbWVudC12YWx1ZSI6Ik1iZ0ZxalQ0amZSK2ZLMU80WXlRdFpVWUQwbmhYaDdHZmhNMEVtUjZ0Z2M9Iiwic2lnbmVyLWlkIjoickxzUngrVGFJWElGVWp6a3pob2tXdUdpT2E0OGEvMmVlSEgzNWRpNjZHcz0ifV19fX19.PCUUBd6tyV2WdXuM07de3-ZFpKdoL-uEP7yeP1zNEJOpEJ9sVUDJkINI3nalh7nno2etEitbQABZxBCsy_6tKg
+Raw attestation result (JWT): eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9...
 
 Disposing client session.
 
@@ -326,7 +325,7 @@ The attestation result is recorded in the `ear.status` field. If it is `affirmin
                 "psa-software-components": [
                     {
                         "measurement-type": "PRoT",
-                        "measurement-value": "MbgFqjT4jfR+fK1O4YyQtZUYD0nhXh7GfhM0EmR6tgc=",
+                        "measurement-value": "9N83pupM9FrR+foQI2CcsrXjJE9slQJshl2mhCaHF2Y=",
                         "signer-id": "rLsRx+TaIXIFUjzkzhokWuGiOa48a/2eeHH35di66Gs="
                     }
                 ]
@@ -588,6 +587,8 @@ docker stop relying-party-service
 docker network rm veraison-net
 ```
 
+---
+
 ## Acknowlegement
 
 This work was supported by JST, CREST Grant Number JPMJCR21M3 ([ZeroTrust IoT Project](https://zt-iot.nii.ac.jp/en/)), Japan.
@@ -781,13 +782,17 @@ go build -o rp main.go
 ./attester/container/launch_soc_term.sh secure
 ```
 
-#### 4.4. ユーザが追加した CA/TA/PTA のビルドと、QEMU の起動とログイン
+#### 4.4. ビルドと QEMU の起動
 
-手順 4.1. で起動したターミナルで以下コマンドをを実行してください。以下のコマンでは `/optee/optee_os/core/pta/sub.mk` を編集し、`subdirs-y += remote_attestation` の行を追加し、追加したアプリケーションを再ビルドし、QEMUを立ち上げます。
+手順 4.1. で起動したターミナルで以下コマンドを実行してください。`remote_attestation` PTA を追加して QEMU を起動します。
+
 ```sh
+echo "" >> /optee/optee_os/core/pta/sub.mk
 echo "subdirs-y += remote_attestation" >> /optee/optee_os/core/pta/sub.mk
 make -C ${OPTEE_DIR}/build run CFG_REMOTE_ATTESTATION_PTA=y -j
 ```
+
+注意: 本プロジェクトの `remote_attestation` PTA は、upstream の `veraison_attestation` PTA とは異なる UUID (`7ccf76c3-4dfe-4310-bfd4-982f3a2fe9a2`) を使用しているため、競合なく共存できます。`CFG_REMOTE_ATTESTATION_PTA=y` フラグで PTA のコンパイルが有効になります。
 
 QEMU が立ち上がったら、c を入力します。
 ```sh
@@ -807,40 +812,36 @@ buildroot login: test
 optee_remote_attestation
 ```
 
-正しく実行できた場合、以下のような出力が noromal world のターミナルで得られます。
+正しく実行できた場合、以下のような出力が normal world のターミナルで得られます。
 ```txt
-Opened new Veraison client session at http://relying-party-service:8087/challenge-response/v1/session/ed70cc0d-d141-11ee-9588-623338313838
+Opened new Veraison client session at https://verification-service:8080/challenge-response/v1/session/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
-Number of media types accepted: 7
-	application/vnd.parallaxsecond.key-attestation.cca
-	application/vnd.parallaxsecond.key-attestation.tpm
-	application/pem-certificate-chain
-	application/vnd.enacttrust.tpm-evidence
-	application/eat-collection; profile=http://arm.com/CCA-SSD/1.0.0
-	application/psa-attestation-token
-	application/eat-cwt; profile=http://arm.com/psa/2.0.0
+Number of media types accepted: 9
+        application/eat-collection; profile="http://arm.com/CCA-SSD/1.0.0"
+        application/vnd.parallaxsecond.key-attestation.cca
+        application/vnd.parallaxsecond.key-attestation.tpm
+        application/psa-attestation-token
+        application/eat-cwt; profile="http://arm.com/psa/2.0.0"
+        ...
 
 Nonce size: 32 bytes
-Nonce: [0x60, 0x48, 0xbd, 0x24, 0x55, 0xdb, 0x8a, 0x4, 0x6e, 0xcc, 0x7, 0x20, 0x40, 0x26, 0x87, 0xd0, 0x60, 0x72, 0xd, 0x95, 0x45, 0x57, 0x92, 0xa5, 0x36, 0xf4, 0x84, 0x52, 0xd5, 0xee, 0x5d, 0xbe]
+Nonce: [0xbd, 0x28, 0xef, ...]
 
 Completed opening the session.
-
 
 Invoke TA.
 Invoked TA successfully.
 
-
 Received evidence of CBOR (COSE) format from PTA.
 
 CBOR(COSE) size: 306
-CBOR(COSE): d28443a10126a058e7a71901097818687474703a2f2f61726d2e636f6d2f7073612f322e302e3019095a0119095b19300019095c582061636d652d696d706c656d656e746174696f6e2d69642d30303030303030303119095f81a3016450526f5402582031b805aa34f88df47e7cad4ee18c90b595180f49e15e1ec67e133412647ab607055820acbb11c7e4da217205523ce4ce1a245ae1a239ae3c6bfd9e7871f7e5d8bae86b0a58206048bd2455db8a046ecc0720402687d060720d95455792a536f48452d5ee5dbe190100582101ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f15085840fd39ee2aac4f64be2a58c1eca501ec1a3a7528f73bcbe8a90e7e1efda7e2cfce793fd28137c8a966793b605981fa677824867b22e21efcd6908338c4e3083b08
-
+CBOR(COSE): d28443a10126a0...
 
 Supplying the generated evidence to the server.
 
 Received the attestation result from the server.
 
-Raw attestation result (JWT): eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJlYXIudmVyaWZpZXItaWQiOnsiYnVpbGQiOiJOL0EiLCJkZXZlbG9wZXIiOiJWZXJhaXNvbiBQcm9qZWN0In0sImVhdF9ub25jZSI6IllFaTlKRlhiaWdSdXpBY2dRQ2FIMEdCeURaVkZWNUtsTnZTRVV0WHVYYjQ9IiwiZWF0X3Byb2ZpbGUiOiJ0YWc6Z2l0aHViLmNvbSwyMDIzOnZlcmFpc29uL2VhciIsImlhdCI6MTcwODU3OTE1OSwic3VibW9kcyI6eyJQU0FfSU9UIjp7ImVhci5hcHByYWlzYWwtcG9saWN5LWlkIjoicG9saWN5OlBTQV9JT1QiLCJlYXIuc3RhdHVzIjoiYWZmaXJtaW5nIiwiZWFyLnRydXN0d29ydGhpbmVzcy12ZWN0b3IiOnsiY29uZmlndXJhdGlvbiI6MCwiZXhlY3V0YWJsZXMiOjIsImZpbGUtc3lzdGVtIjowLCJoYXJkd2FyZSI6MiwiaW5zdGFuY2UtaWRlbnRpdHkiOjIsInJ1bnRpbWUtb3BhcXVlIjoyLCJzb3VyY2VkLWRhdGEiOjAsInN0b3JhZ2Utb3BhcXVlIjoyfSwiZWFyLnZlcmFpc29uLmFubm90YXRlZC1ldmlkZW5jZSI6eyJlYXQtcHJvZmlsZSI6Imh0dHA6Ly9hcm0uY29tL3BzYS8yLjAuMCIsInBzYS1jbGllbnQtaWQiOjEsInBzYS1pbXBsZW1lbnRhdGlvbi1pZCI6IllXTnRaUzFwYlhCc1pXMWxiblJoZEdsdmJpMXBaQzB3TURBd01EQXdNREU9IiwicHNhLWluc3RhbmNlLWlkIjoiQWM3cnJudUpKNk1pZmxNRHoxNFBIM3MwdTFRcTF5VUt3RCs4M2pic0x4VUkiLCJwc2Etbm9uY2UiOiJZRWk5SkZYYmlnUnV6QWNnUUNhSDBHQnlEWlZGVjVLbE52U0VVdFh1WGI0PSIsInBzYS1zZWN1cml0eS1saWZlY3ljbGUiOjEyMjg4LCJwc2Etc29mdHdhcmUtY29tcG9uZW50cyI6W3sibWVhc3VyZW1lbnQtdHlwZSI6IlBSb1QiLCJtZWFzdXJlbWVudC12YWx1ZSI6Ik1iZ0ZxalQ0amZSK2ZLMU80WXlRdFpVWUQwbmhYaDdHZmhNMEVtUjZ0Z2M9Iiwic2lnbmVyLWlkIjoickxzUngrVGFJWElGVWp6a3pob2tXdUdpT2E0OGEvMmVlSEgzNWRpNjZHcz0ifV19fX19.PCUUBd6tyV2WdXuM07de3-ZFpKdoL-uEP7yeP1zNEJOpEJ9sVUDJkINI3nalh7nno2etEitbQABZxBCsy_6tKg
+Raw attestation result (JWT): eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9...
 
 Disposing client session.
 
@@ -894,7 +895,7 @@ docker logs relying-party-service
                 "psa-software-components": [
                     {
                         "measurement-type": "PRoT",
-                        "measurement-value": "MbgFqjT4jfR+fK1O4YyQtZUYD0nhXh7GfhM0EmR6tgc=",
+                        "measurement-value": "9N83pupM9FrR+foQI2CcsrXjJE9slQJshl2mhCaHF2Y=",
                         "signer-id": "rLsRx+TaIXIFUjzkzhokWuGiOa48a/2eeHH35di66Gs="
                     }
                 ]
@@ -1149,6 +1150,8 @@ make -C services really-clean
 docker stop relying-party-service
 docker network rm veraison-net
 ```
+
+---
 
 ## 謝辞
 研究は、JST、CREST、JPMJCR21M3 ([Zero Trust IoT プロジェクト](https://zt-iot.nii.ac.jp/)) の支援を受けたものです。
