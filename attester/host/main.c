@@ -152,11 +152,11 @@ int main(int argc, char *argv[]) {
              err_origin);
 
     /* Convert plain key to black key */
-    if (argc > 1 && (strcmp(argv[1], "--convert-key") == 0 || 
+    if (argc > 1 && (strcmp(argv[1], "--convert-key") == 0 ||
                      strcmp(argv[1], "--convert-key-file") == 0)) {
         uint8_t *plain_key = NULL;
         size_t plain_key_len = 0;
-        
+
         if (strcmp(argv[1], "--convert-key") == 0 && argc > 2) {
             if (parse_hex(argv[2], &plain_key, &plain_key_len) != 0)
                 errx(1, "Invalid plain key hex");
@@ -168,28 +168,22 @@ int main(int argc, char *argv[]) {
         } else {
             errx(1, "Missing key value for conversion");
         }
-        
+
         if (plain_key_len != 32)
             errx(1, "Plain key must be 32 bytes for P-256");
-        
+
         TEEC_Operation op_c = {0};
         uint8_t black_key[512] = {0};
-        uint8_t pub_x[32] = {0};
-        uint8_t pub_y[32] = {0};
-        
+
         op_c.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INPUT,
                                            TEEC_MEMREF_TEMP_OUTPUT,
-                                           TEEC_MEMREF_TEMP_OUTPUT,
-                                           TEEC_MEMREF_TEMP_OUTPUT);
+                                           TEEC_NONE,
+                                           TEEC_NONE);
         op_c.params[0].tmpref.buffer = plain_key;
         op_c.params[0].tmpref.size = plain_key_len;
         op_c.params[1].tmpref.buffer = black_key;
         op_c.params[1].tmpref.size = sizeof(black_key);
-        op_c.params[2].tmpref.buffer = pub_x;
-        op_c.params[2].tmpref.size = sizeof(pub_x);
-        op_c.params[3].tmpref.buffer = pub_y;
-        op_c.params[3].tmpref.size = sizeof(pub_y);
-        
+
         printf("\nConverting plain key to black key...\n");
         res = TEEC_InvokeCommand(&sess, TA_VERAISON_ATTESTATION_CMD_CONVERT_TO_BLACKKEY,
                                  &op_c, &err_origin);
@@ -197,13 +191,9 @@ int main(int argc, char *argv[]) {
             free(plain_key);
             errx(1, "Convert key failed 0x%x origin 0x%x", res, err_origin);
         }
-        
+
         printf("BlackKey(hex): ");
         print_binary_in_hex(black_key, op_c.params[1].tmpref.size);
-        printf("PubX(hex): ");
-        print_binary_in_hex(pub_x, sizeof(pub_x));
-        printf("PubY(hex): ");
-        print_binary_in_hex(pub_y, sizeof(pub_y));
         free(plain_key);
         printf("Key conversion completed.\n");
         return 0;

@@ -284,31 +284,25 @@ static TEE_Result cmd_convert_to_blackkey(uint32_t param_types,
 {
 #ifdef CFG_NXP_CAAM_ECC_DRV
 	/*
-	 * Convert plain ECC private key to CAAM black key
+	 * Convert plain ECC private key to CAAM black key.
+	 * Note: Public key is NOT output. User should already know
+	 * the public key corresponding to their private key.
+	 *
 	 * [in]  memref[0]: plain private key d (32 bytes for P-256)
 	 * [out] memref[1]: serialized black key (size-probe allowed)
-	 * [out] memref[2]: public key X coordinate (32 bytes)
-	 * [out] memref[3]: public key Y coordinate (32 bytes)
 	 */
 	uint32_t exp_pt = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
 					  TEE_PARAM_TYPE_MEMREF_OUTPUT,
-					  TEE_PARAM_TYPE_MEMREF_OUTPUT,
-					  TEE_PARAM_TYPE_MEMREF_OUTPUT);
+					  TEE_PARAM_TYPE_NONE,
+					  TEE_PARAM_TYPE_NONE);
 	TEE_Result res = TEE_ERROR_GENERIC;
 	enum caam_status caam_res = CAAM_FAILURE;
 	struct caamkey caam_key = { };
-	struct ecc_keypair ecc_key = { };
 	uint8_t *plain_d = NULL;
 	size_t plain_d_size = 0;
 	uint8_t *out_ser = NULL;
 	size_t out_ser_size = 0;
-	uint8_t *out_x = NULL;
-	size_t out_x_size = 0;
-	uint8_t *out_y = NULL;
-	size_t out_y_size = 0;
 	size_t need_size = 0;
-	size_t x_len = 0;
-	size_t y_len = 0;
 	const size_t sec_size = 32; /* P-256 */
 	enum caam_key_type enc_type = CAAM_KEY_BLACK_CCM;
 
@@ -319,10 +313,6 @@ static TEE_Result cmd_convert_to_blackkey(uint32_t param_types,
 	plain_d_size = params[0].memref.size;
 	out_ser = params[1].memref.buffer;
 	out_ser_size = params[1].memref.size;
-	out_x = params[2].memref.buffer;
-	out_x_size = params[2].memref.size;
-	out_y = params[3].memref.buffer;
-	out_y_size = params[3].memref.size;
 
 	/* Validate input private key size (P-256) */
 	if (!plain_d || plain_d_size != sec_size)
@@ -330,10 +320,6 @@ static TEE_Result cmd_convert_to_blackkey(uint32_t param_types,
 
 	/* Support size probe for serialized black key */
 	if (!out_ser && out_ser_size)
-		return TEE_ERROR_BAD_PARAMETERS;
-
-	/* Validate public key output buffers */
-	if ((!out_x && out_x_size) || (!out_y && out_y_size))
 		return TEE_ERROR_BAD_PARAMETERS;
 
 	/* Initialize CAAM key structure with plain scalar d */
@@ -378,85 +364,8 @@ static TEE_Result cmd_convert_to_blackkey(uint32_t param_types,
 		params[1].memref.size = need_size;
 	}
 
-	/*
-	 * Compute public key from private key.
-	 * We need to allocate an ECC keypair and generate the public key
-	 * from the original plain private key.
-	 */
-	res = crypto_acipher_alloc_ecc_keypair(&ecc_key, TEE_TYPE_ECDSA_KEYPAIR,
-					       sec_size * 8);
-	if (res != TEE_SUCCESS)
-		goto out_caam;
-
-	ecc_key.curve = TEE_ECC_CURVE_NIST_P256;
-
-	/* Import the plain private key */
-	ecc_key.d = crypto_bignum_allocate(sec_size * 8);
-	if (!ecc_key.d) {
-		res = TEE_ERROR_OUT_OF_MEMORY;
-		goto out_ecc;
-	}
-	crypto_bignum_bin2bn(plain_d, plain_d_size, ecc_key.d);
-
-	/* Allocate public key coordinates */
-	ecc_key.x = crypto_bignum_allocate(sec_size * 8);
-	ecc_key.y = crypto_bignum_allocate(sec_size * 8);
-	if (!ecc_key.x || !ecc_key.y) {
-		res = TEE_ERROR_OUT_OF_MEMORY;
-		goto out_ecc;
-	}
-
-	/*
-	 * Generate public key from private key using ECC point multiplication.
-	 * We generate a temporary keypair and replace the private key to 
-	 * compute the corresponding public key.
-	 */
-	res = crypto_acipher_gen_ecc_key(&ecc_key, sec_size * 8);
-	if (res != TEE_SUCCESS) {
-		EMSG("[veraison-pta] Failed to generate public key: 0x%x", res);
-		goto out_ecc;
-	}
-
-	/* Export public key X coordinate */
-	x_len = crypto_bignum_num_bytes(ecc_key.x);
-	if (out_x_size < sec_size) {
-		params[2].memref.size = sec_size;
-		res = TEE_ERROR_SHORT_BUFFER;
-		goto out_ecc;
-	}
-	if (out_x) {
-		memset(out_x, 0, sec_size);
-		if (x_len > sec_size) {
-			res = TEE_ERROR_GENERIC;
-			goto out_ecc;
-		}
-		crypto_bignum_bn2bin(ecc_key.x, out_x + (sec_size - x_len));
-		params[2].memref.size = sec_size;
-	}
-
-	/* Export public key Y coordinate */
-	y_len = crypto_bignum_num_bytes(ecc_key.y);
-	if (out_y_size < sec_size) {
-		params[3].memref.size = sec_size;
-		res = TEE_ERROR_SHORT_BUFFER;
-		goto out_ecc;
-	}
-	if (out_y) {
-		memset(out_y, 0, sec_size);
-		if (y_len > sec_size) {
-			res = TEE_ERROR_GENERIC;
-			goto out_ecc;
-		}
-		crypto_bignum_bn2bin(ecc_key.y, out_y + (sec_size - y_len));
-		params[3].memref.size = sec_size;
-	}
-
 	res = TEE_SUCCESS;
 
-out_ecc:
-	crypto_bignum_free(&ecc_key.d);
-	crypto_bignum_free(&ecc_key.x);
-	crypto_bignum_free(&ecc_key.y);
 out_caam:
 	caam_key_free(&caam_key);
 	return res;

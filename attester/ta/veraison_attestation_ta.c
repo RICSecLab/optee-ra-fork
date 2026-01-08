@@ -200,8 +200,8 @@ TEE_Result TA_InvokeCommandEntryPoint(void __unused *sess_ctx, uint32_t cmd_id,
         /* Convert plain key to black key (CAAM only) */
         if (param_types != TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
                                            TEE_PARAM_TYPE_MEMREF_OUTPUT,
-                                           TEE_PARAM_TYPE_MEMREF_OUTPUT,
-                                           TEE_PARAM_TYPE_MEMREF_OUTPUT))
+                                           TEE_PARAM_TYPE_NONE,
+                                           TEE_PARAM_TYPE_NONE))
             return TEE_ERROR_BAD_PARAMETERS;
 
         TEE_TASessionHandle sess = TEE_HANDLE_NULL;
