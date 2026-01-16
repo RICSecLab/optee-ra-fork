@@ -103,8 +103,13 @@ verification: running
 Use the following commands to register the `trust anchor` and `reference value` with the Verifier. These values are used to verify the evidence sent by the Attester. If you want to change the values to be registered, modify the files under `provisioning/data`.
 
 ```sh
-./provisoning/run.sh
+# QEMU (default)
+./provisoning/run.sh qemu
+# i.MX 8M Plus
+./provisoning/run.sh imx
 ```
+
+If you omit the argument, `qemu` is used.
 
 You can check the registered values with the following command.
 ```sh
@@ -285,7 +290,14 @@ Open another terminal and use the following command to check the logs of the rel
 docker logs relying-party-service
 ```
 
-The attestation result is recorded in the `ear.status` field. If it is `affirming`, it means that the correct attetation result was obtained.
+The attestation result is recorded in the `ear.status` field. If it is `affirming`, it means that the correct attestation result was obtained.
+
+If you see `ear.status` as `warning` with a message like `executables not recognized`, the verifier still has old endorsements. In a shell where `env.bash` is sourced, clear the stores and re-run provisioning (use `imx` instead of `qemu` for the device).
+
+```sh
+veraison clear-stores
+./provisoning/run.sh qemu
+```
 
 ```txt
 2024/02/22 05:19:18 Received request: POST /challenge-response/v1/newSession?nonceSize=32
@@ -685,8 +697,13 @@ verification: running
 
 以下のコマンドで、Verifier に対して、`trust anchor` と `reference value` を登録します。これらの値は Attester から送信された evidence の検証に用いられます。登録する値を変更したい場合は `provisoning/data` 以下のファイルを改変してください。
 ```sh
-./provisoning/run.sh
+# QEMU (default)
+./provisoning/run.sh qemu
+# i.MX 8M Plus
+./provisoning/run.sh imx
 ```
+
+引数を省略した場合は `qemu` が使われます。
 
 登録された値は以下のコマンドで確認できます。
 ```sh
@@ -855,6 +872,13 @@ docker logs relying-party-service
 ```
 
 アテステーション結果は `ear.status` の欄に記載されており、`affirming` であれば正しいアテステーション結果が得られたことを意味しています。
+
+`ear.status` が `warning` で `executables not recognized` のようなログが出る場合は、古いエンドースメントが残っています。`env.bash` を source したシェルでストアをクリアし、provisioning をやり直してください（実機は `imx` を指定します）。
+
+```sh
+veraison clear-stores
+./provisoning/run.sh qemu
+```
 ```txt
 2024/02/22 05:19:18 Received request: POST /challenge-response/v1/newSession?nonceSize=32
 2024/02/22 05:19:18 Received response: 201 Created
