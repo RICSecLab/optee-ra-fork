@@ -172,6 +172,11 @@ Next, start the container for the Relying Party and run the application. The Rel
 ./relying_party/container/start.sh
 ```
 
+If your verification service is not available at `https://verification-service:8080`, set `VERIFICATION_SERVICE_URL` before starting (default: `https://verification-service:8080`).
+```sh
+VERIFICATION_SERVICE_URL=https://verification-service:8443 ./relying_party/container/start.sh
+```
+
 You can check the logs of the Relying Party with the following command.
 
 ```sh
