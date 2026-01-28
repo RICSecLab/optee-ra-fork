@@ -128,5 +128,7 @@ OP-TEE OS内で動作するCAAM対応のRemote Attestation PTA：
 
 ```bash
 # Remote Attestationの実行
-optee_remote_attestation --verifier <verifier-url> --nonce <base64-nonce>
+optee_remote_attestation
 ```
+
+Verifier の URL は `attester/remote_attestation/host/client.h` の `SERVER_BASE_URL` で設定します（変更後は再ビルドが必要です）。

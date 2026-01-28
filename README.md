@@ -33,6 +33,8 @@ To run the developed artifacts, you need to prepare an environment that meets th
 
 Follow these steps from 0 to 6 to test the entire process of remote attestation.
 
+For i.MX 8M Plus Yocto builds, see `attester/container-imx/README.md`. For QEMU-only Attester steps, see `attester/README.md`.
+
 
 ### 0. Clone this GitHub repository
 First, retrieve the source code for optee-ra by running git clone.
@@ -100,7 +102,7 @@ verification: running
 ```
 
 ### 2. Executing the Provisioning
-Use the following commands to register the `trust anchor` and `reference value` with the Verifier. These values are used to verify the evidence sent by the Attester. If you want to change the values to be registered, modify the files under `provisioning/data`.
+Use the following commands to register the `trust anchor` and `reference value` with the Verifier. These values are used to verify the evidence sent by the Attester. If you want to change the values to be registered, modify the files under `provisoning/data`.
 
 ```sh
 # QEMU (default)
@@ -220,10 +222,9 @@ Open another terminal, separate from the ones used in steps 4.1 and 4.2, and exe
 
 #### 4.4. Building User-Added CA/TA/PTA, Starting QEMU, and Logging In
 
-In the terminal started in step 4.1, execute the following command. This command edits `/optee/optee_os/core/pta/sub.mk` to add the line `subdirs-y += remote_attestation`, rebuilds the added application, and starts QEMU.
+In the terminal started in step 4.1, execute the following command to rebuild the user-added CA/TA/PTA and start QEMU. The container image already appends `subdirs-y += remote_attestation` to `/optee/optee_os/core/pta/sub.mk`, so no manual edit is needed.
 
 ```sh
-echo "subdirs-y += remote_attestation" >> /optee/optee_os/core/pta/sub.mk
 make -C ${OPTEE_DIR}/build run CFG_REMOTE_ATTESTATION_PTA=y -j
 ```
 
@@ -388,7 +389,7 @@ index 4380753..d9cad98 100644
  #if defined(HOST_BUILD)
 ```
 
-Actually, after rewriting the code, send the attestation request. In the terminal where you started QEMU in step 4.4, press `ctrl+c` to exit QEMU. Then, follow step 4.4 again to rebuild the TA and restart QEMU (there is no need to re-run the `echo` command to add the `subdirs-y += remote_attestation` line).
+Actually, after rewriting the code, send the attestation request. In the terminal where you started QEMU in step 4.4, press `ctrl+c` to exit QEMU. Then, follow step 4.4 again to rebuild the TA and restart QEMU.
 
 After that, follow step 4.5 to send the attestation request, and follow step 5 to check the results. You will get an attestation result similar to the following. The `"ear.status": "contraindicated"` indicates that the attestation has failed.
 
@@ -447,14 +448,14 @@ First, check the code hash value of the new TA. Currently, when a request to gen
 D/TC:? 0 cmd_get_cbor_evidence:82 b64_measurement_value: gw9v98IV8ozl5nHpsMwl9W5nGGC0bzAYMPShwvff0vY=
 ```
 
-Register this value with provisioning. To do this, modify the `digests` field in [`provisioning/data/comid-psa-refval.json`](provisioning/data/comid-psa-refval.json) as follows:
-Also, since the implementation ID has been changed to `acme-implementation-id-000000002`, modify the `psa.impl-id` fields in both [`provisioning/data/comid-psa-refval.json`](provisioning/data/comid-psa-refval.json) and [`provisioning/data/comid-psa-ta.json`](provisioning/data/comid-psa-ta.json) as follows. Note that the `psa.impl-id` field must register the base64 encoded value of the implementation ID. For example, you can calculate it with a command like `echo -n "acme-implementation-id-000000002" | base64`.
+Register this value with provisioning. To do this, modify the `digests` field in [`provisoning/data/comid-psa-refval-qemu.json`](provisoning/data/comid-psa-refval-qemu.json) as follows (use `provisoning/data/comid-psa-refval-imx.json` for i.MX 8M Plus).
+Also, since the implementation ID has been changed to `acme-implementation-id-000000002`, modify the `psa.impl-id` fields in both [`provisoning/data/comid-psa-refval-qemu.json`](provisoning/data/comid-psa-refval-qemu.json) and [`provisoning/data/comid-psa-ta.json`](provisoning/data/comid-psa-ta.json) as follows. Note that the `psa.impl-id` field must register the base64 encoded value of the implementation ID. For example, you can calculate it with a command like `echo -n "acme-implementation-id-000000002" | base64`.
 
 ```txt
-diff --git a/provisoning/data/comid-psa-refval.json b/provisoning/data/comid-psa-refval.json
+diff --git a/provisoning/data/comid-psa-refval-qemu.json b/provisoning/data/comid-psa-refval-qemu.json
 index fd7965a..db675c1 100644
---- a/provisoning/data/comid-psa-refval.json
-+++ b/provisoning/data/comid-psa-refval.json
+--- a/provisoning/data/comid-psa-refval-qemu.json
++++ b/provisoning/data/comid-psa-refval-qemu.json
 @@ -22,7 +22,7 @@
            "class": {
              "id": {
@@ -641,6 +642,8 @@ OP-TEEはRaspberry Pi 3B+ (Arm Cortex-A TrustZone)でも動作が確認できて
 
 以下の 0 から 6 の手順に従い、リモートアテステーションの一連の流れをテストしてください。
 
+i.MX 8M Plus 向け Yocto ビルドの手順は `attester/container-imx/README.md` を参照してください。QEMU 向けの Attester 手順のみ確認したい場合は `attester/README.md` を参照してください。
+
 ### 0. このgithubのクローン
 最初にgit cloneによりoptee-raのソースを取り寄せます。
 ```sh
@@ -805,9 +808,8 @@ go build -o rp main.go
 
 #### 4.4. ユーザが追加した CA/TA/PTA のビルドと、QEMU の起動とログイン
 
-手順 4.1. で起動したターミナルで以下コマンドをを実行してください。以下のコマンでは `/optee/optee_os/core/pta/sub.mk` を編集し、`subdirs-y += remote_attestation` の行を追加し、追加したアプリケーションを再ビルドし、QEMUを立ち上げます。
+手順 4.1. で起動したターミナルで以下コマンドをを実行してください。ユーザが追加した CA/TA/PTA を再ビルドし、QEMU を起動します。コンテナイメージが `/optee/optee_os/core/pta/sub.mk` に `subdirs-y += remote_attestation` を自動で追加するため、手動編集は不要です。
 ```sh
-echo "subdirs-y += remote_attestation" >> /optee/optee_os/core/pta/sub.mk
 make -C ${OPTEE_DIR}/build run CFG_REMOTE_ATTESTATION_PTA=y -j
 ```
 
@@ -966,7 +968,7 @@ index 4380753..d9cad98 100644
  #if defined(HOST_BUILD)
 ```
 
-実際に、コードを書き換えた後にアテステーションリクエストを送信してみます。手順 4.4. で QEMU を起動したターミナルで `ctrl+c` をして、一度 QEMU を終了します。その後、もう一度手順 4.4 に従い、TA の再ビルド・QEMU の再起動をします（`echo` コマンドで `subdirs-y += remote_attestation` の行を追加するコマンドを再実行する必要はないです）。
+実際に、コードを書き換えた後にアテステーションリクエストを送信してみます。手順 4.4. で QEMU を起動したターミナルで `ctrl+c` をして、一度 QEMU を終了します。その後、もう一度手順 4.4 に従い、TA の再ビルド・QEMU の再起動をします。
 
 その後、手順 4.5. に従い、アテステーションリクエストを送り、手順 5. に従い結果を確認すると、以下のようなアテステーション結果が得られます。`"ear.status": "contraindicated"` になっており、アテステーションに失敗していることがわかります。 
 ```txt
@@ -1023,13 +1025,13 @@ Sourced Data [contraindicated]: Cryptographic validation of the Evidence has fai
 D/TC:? 0 cmd_get_cbor_evidence:82 b64_measurement_value: gw9v98IV8ozl5nHpsMwl9W5nGGC0bzAYMPShwvff0vY=
 ```
 
-この値を provisioning で登録します。そのためには、[`provisoning/data/comid-psa-refval.json`](provisoning/data/comid-psa-refval.json) の `digests` の欄を以下のように書き換えてください。
-また、implementation ID も `acme-implementation-id-000000002` に変更しているため、[`provisoning/data/comid-psa-refval.json`](provisoning/data/comid-psa-refval.json) と [`provisoning/data/comid-psa-ta.json`](provisoning/data/comid-psa-ta.json) の `psa.impl-id` の欄を以下のように書き換えてください。注意しとして、`psa.impl-id` の欄は implementation ID を base64 エンコードした値を登録する必要があります。例えば、`echo -n "acme-implementation-id-000000002" | base64` のようなコマンドで計算できます。
+この値を provisioning で登録します。そのためには、[`provisoning/data/comid-psa-refval-qemu.json`](provisoning/data/comid-psa-refval-qemu.json) の `digests` の欄を以下のように書き換えてください（実機の場合は `provisoning/data/comid-psa-refval-imx.json` を使います）。
+また、implementation ID も `acme-implementation-id-000000002` に変更しているため、[`provisoning/data/comid-psa-refval-qemu.json`](provisoning/data/comid-psa-refval-qemu.json) と [`provisoning/data/comid-psa-ta.json`](provisoning/data/comid-psa-ta.json) の `psa.impl-id` の欄を以下のように書き換えてください。注意しとして、`psa.impl-id` の欄は implementation ID を base64 エンコードした値を登録する必要があります。例えば、`echo -n "acme-implementation-id-000000002" | base64` のようなコマンドで計算できます。
 ```txt
-diff --git a/provisoning/data/comid-psa-refval.json b/provisoning/data/comid-psa-refval.json
+diff --git a/provisoning/data/comid-psa-refval-qemu.json b/provisoning/data/comid-psa-refval-qemu.json
 index fd7965a..db675c1 100644
---- a/provisoning/data/comid-psa-refval.json
-+++ b/provisoning/data/comid-psa-refval.json
+--- a/provisoning/data/comid-psa-refval-qemu.json
++++ b/provisoning/data/comid-psa-refval-qemu.json
 @@ -22,7 +22,7 @@
            "class": {
              "id": {

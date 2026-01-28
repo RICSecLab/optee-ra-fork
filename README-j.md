@@ -191,9 +191,8 @@ go build -o rp main.go
 
 #### 4.4. ユーザが追加した CA/TA/PTA のビルドと、QEMU の起動とログイン
 
-手順 4.1. で起動したターミナルで以下コマンドをを実行してください。以下のコマンでは `/optee/optee_os/core/pta/sub.mk` を編集し、`subdirs-y += remote_attestation` の行を追加し、追加したアプリケーションを再ビルドし、QEMUを立ち上げます。
+手順 4.1. で起動したターミナルで以下コマンドをを実行してください。ユーザが追加した CA/TA/PTA を再ビルドし、QEMU を起動します。コンテナイメージが `/optee/optee_os/core/pta/sub.mk` に `subdirs-y += remote_attestation` を自動で追加するため、手動編集は不要です。
 ```sh
-echo "subdirs-y += remote_attestation" >> /optee/optee_os/core/pta/sub.mk
 make -C ${OPTEE_DIR}/build run CFG_REMOTE_ATTESTATION_PTA=y -j
 ```
 
@@ -352,7 +351,7 @@ index 4380753..d9cad98 100644
  #if defined(HOST_BUILD)
 ```
 
-実際に、コードを書き換えた後にアテステーションリクエストを送信してみます。手順 4.4. で QEMU を起動したターミナルで `ctrl+c` をして、一度 QEMU を終了します。その後、もう一度手順 4.4 に従い、TA の再ビルド・QEMU の再起動をします（`echo` コマンドで `subdirs-y += remote_attestation` の行を追加するコマンドを再実行する必要はないです）。
+実際に、コードを書き換えた後にアテステーションリクエストを送信してみます。手順 4.4. で QEMU を起動したターミナルで `ctrl+c` をして、一度 QEMU を終了します。その後、もう一度手順 4.4 に従い、TA の再ビルド・QEMU の再起動をします。
 
 その後、手順 4.5. に従い、アテステーションリクエストを送り、手順 5. に従い結果を確認すると、以下のようなアテステーション結果が得られます。`"ear.status": "contraindicated"` になっており、アテステーションに失敗していることがわかります。 
 ```txt
@@ -409,13 +408,13 @@ Sourced Data [contraindicated]: Cryptographic validation of the Evidence has fai
 D/TC:? 0 cmd_get_cbor_evidence:82 b64_measurement_value: gw9v98IV8ozl5nHpsMwl9W5nGGC0bzAYMPShwvff0vY=
 ```
 
-この値を provisioning で登録します。そのためには、[`provisoning/data/comid-psa-refval.json`](provisoning/data/comid-psa-refval.json) の `digests` の欄を以下のように書き換えてください。
-また、implementation ID も `acme-implementation-id-000000002` に変更しているため、[`provisoning/data/comid-psa-refval.json`](provisoning/data/comid-psa-refval.json) と [`provisoning/data/comid-psa-ta.json`](provisoning/data/comid-psa-ta.json) の `psa.impl-id` の欄を以下のように書き換えてください。注意しとして、`psa.impl-id` の欄は implementation ID を base64 エンコードした値を登録する必要があります。例えば、`echo -n "acme-implementation-id-000000002" | base64` のようなコマンドで計算できます。
+この値を provisioning で登録します。そのためには、[`provisoning/data/comid-psa-refval-qemu.json`](provisoning/data/comid-psa-refval-qemu.json) の `digests` の欄を以下のように書き換えてください（実機の場合は `provisoning/data/comid-psa-refval-imx.json` を使います）。
+また、implementation ID も `acme-implementation-id-000000002` に変更しているため、[`provisoning/data/comid-psa-refval-qemu.json`](provisoning/data/comid-psa-refval-qemu.json) と [`provisoning/data/comid-psa-ta.json`](provisoning/data/comid-psa-ta.json) の `psa.impl-id` の欄を以下のように書き換えてください。注意しとして、`psa.impl-id` の欄は implementation ID を base64 エンコードした値を登録する必要があります。例えば、`echo -n "acme-implementation-id-000000002" | base64` のようなコマンドで計算できます。
 ```txt
-diff --git a/provisoning/data/comid-psa-refval.json b/provisoning/data/comid-psa-refval.json
+diff --git a/provisoning/data/comid-psa-refval-qemu.json b/provisoning/data/comid-psa-refval-qemu.json
 index fd7965a..db675c1 100644
---- a/provisoning/data/comid-psa-refval.json
-+++ b/provisoning/data/comid-psa-refval.json
+--- a/provisoning/data/comid-psa-refval-qemu.json
++++ b/provisoning/data/comid-psa-refval-qemu.json
 @@ -22,7 +22,7 @@
            "class": {
              "id": {
