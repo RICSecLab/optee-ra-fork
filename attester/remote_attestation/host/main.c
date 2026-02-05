@@ -56,6 +56,12 @@ static void print_usage(const char *prog) {
     printf("  --generate-blackkey       Generate new black key (CAAM only)\n");
     printf("  --convert-key HEX         Convert plain key to black key (CAAM only)\n");
     printf("  --key-hex HEX             Use key blob in hex for signing\n");
+    printf("  --pubx-hex HEX            Public key X coordinate (32 bytes hex)\n");
+    printf("  --puby-hex HEX            Public key Y coordinate (32 bytes hex)\n");
+    printf("\n");
+    printf("When using --key-hex with a CAAM black key, also supply --pubx-hex\n");
+    printf("and --puby-hex so the PTA can compute the correct PSA instance-id.\n");
+    printf("Alternatively, pass the FullKey (PubX||PubY||blob) directly to --key-hex.\n");
     printf("\n");
 }
 
@@ -168,6 +174,21 @@ int main(int argc, char *argv[]) {
         print_binary_in_hex(pub_x, sizeof(pub_x));
         printf("PubY(hex): ");
         print_binary_in_hex(pub_y, sizeof(pub_y));
+
+        /* FullKey = PubX || PubY || blob — pass directly to --key-hex */
+        size_t full_len = sizeof(pub_x) + sizeof(pub_y) +
+                          op_p.params[0].tmpref.size;
+        uint8_t *full = (uint8_t *)malloc(full_len);
+        if (full) {
+            memcpy(full, pub_x, sizeof(pub_x));
+            memcpy(full + sizeof(pub_x), pub_y, sizeof(pub_y));
+            memcpy(full + sizeof(pub_x) + sizeof(pub_y), blob,
+                   op_p.params[0].tmpref.size);
+            printf("FullKey(hex): ");
+            print_binary_in_hex(full, full_len);
+            free(full);
+        }
+
         free(blob);
         printf("Black key generation completed.\n");
         return 0;
@@ -183,11 +204,57 @@ int main(int argc, char *argv[]) {
     /* Optional: pass private key from host (SW 'd' or CAAM black key) */
     uint8_t *host_key = NULL;
     size_t host_key_len = 0;
+    uint8_t *host_pub_x = NULL;
+    size_t host_pub_x_len = 0;
+    uint8_t *host_pub_y = NULL;
+    size_t host_pub_y_len = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--key-hex") == 0 && i + 1 < argc) {
             if (parse_hex(argv[i+1], &host_key, &host_key_len) != 0)
                 errx(1, "Invalid --key-hex value");
             i++;
+        } else if (strcmp(argv[i], "--pubx-hex") == 0 && i + 1 < argc) {
+            if (parse_hex(argv[i+1], &host_pub_x, &host_pub_x_len) != 0)
+                errx(1, "Invalid --pubx-hex value");
+            if (host_pub_x_len != 32)
+                errx(1, "--pubx-hex must be exactly 32 bytes");
+            i++;
+        } else if (strcmp(argv[i], "--puby-hex") == 0 && i + 1 < argc) {
+            if (parse_hex(argv[i+1], &host_pub_y, &host_pub_y_len) != 0)
+                errx(1, "Invalid --puby-hex value");
+            if (host_pub_y_len != 32)
+                errx(1, "--puby-hex must be exactly 32 bytes");
+            i++;
+        }
+    }
+
+    /*
+     * Build packed key param: PubX(32) || PubY(32) || key_blob(N)
+     *
+     * If --key-hex value is >= 65 bytes, treat it as a FullKey
+     * (PubX||PubY||blob already concatenated).
+     * Otherwise, --pubx-hex and --puby-hex are required alongside --key-hex.
+     */
+    uint8_t *packed_key_param = NULL;
+    size_t packed_key_param_len = 0;
+
+    if (host_key && host_key_len > 0) {
+        if (host_key_len >= MIN_KEY_PARAM_SIZE && !host_pub_x && !host_pub_y) {
+            /* FullKey format: already PubX||PubY||blob */
+            packed_key_param = host_key;
+            packed_key_param_len = host_key_len;
+        } else if (host_pub_x && host_pub_y) {
+            /* Separate pubkey + key blob */
+            packed_key_param_len = 32 + 32 + host_key_len;
+            packed_key_param = (uint8_t *)malloc(packed_key_param_len);
+            if (!packed_key_param)
+                errx(1, "Out of memory");
+            memcpy(packed_key_param, host_pub_x, 32);
+            memcpy(packed_key_param + 32, host_pub_y, 32);
+            memcpy(packed_key_param + 64, host_key, host_key_len);
+        } else {
+            errx(1, "--key-hex requires --pubx-hex and --puby-hex "
+                 "(or pass FullKey directly)");
         }
     }
 
@@ -200,8 +267,8 @@ int main(int argc, char *argv[]) {
     /* Setup implementation ID (required by PTA as param[2]) */
     static const uint8_t impl_id[IMPLEMENTATION_ID_LEN] = IMPLEMENTATION_ID;
 
-    if (host_key && host_key_len > 0) {
-        /* Params: nonce(in), output(out), impl_id(in), key(in) */
+    if (packed_key_param && packed_key_param_len > 0) {
+        /* Params: nonce(in), output(out), impl_id(in), packed_key(in) */
         op.paramTypes = TEEC_PARAM_TYPES(
             TEEC_MEMREF_TEMP_INPUT, TEEC_MEMREF_TEMP_OUTPUT,
             TEEC_MEMREF_TEMP_INPUT, TEEC_MEMREF_TEMP_INPUT);
@@ -218,10 +285,10 @@ int main(int argc, char *argv[]) {
     /* param[2] is implementation_id */
     op.params[2].tmpref.buffer = (void *)impl_id;
     op.params[2].tmpref.size = IMPLEMENTATION_ID_LEN;
-    /* param[3] is optional black key */
-    if (host_key && host_key_len > 0) {
-        op.params[3].tmpref.buffer = host_key;
-        op.params[3].tmpref.size = host_key_len;
+    /* param[3] is packed key: PubX(32) || PubY(32) || key_blob(N) */
+    if (packed_key_param && packed_key_param_len > 0) {
+        op.params[3].tmpref.buffer = packed_key_param;
+        op.params[3].tmpref.size = packed_key_param_len;
     }
 
     printf("\nInvoke TA.\n");
@@ -245,7 +312,11 @@ int main(int argc, char *argv[]) {
     post_evidence(session, op.params[1].tmpref.buffer,
                   op.params[1].tmpref.size);
 
+    if (packed_key_param && packed_key_param != host_key)
+        free(packed_key_param);
     if (host_key) free(host_key);
+    if (host_pub_x) free(host_pub_x);
+    if (host_pub_y) free(host_pub_y);
 
     return 0;
 }
