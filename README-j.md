@@ -21,6 +21,7 @@ OP-TEEはRaspberry Pi 3B+ (Arm Cortex-A TrustZone)でも動作が確認できて
 ## 実行方法
 
 以下の 0 から 6 の手順に従い、リモートアテステーションの一連の流れをテストしてください。
+i.MX8MP EVK 実機でのアテステーションは[手順 8](#8-imx8mp-実機でのアテステーション) を参照してください。
 
 ### 0. このgithubのクローン
 最初にgit cloneによりoptee-raのソースを取り寄せます。
@@ -563,6 +564,179 @@ make -C services really-clean
 docker stop relying-party-service
 docker network rm veraison-net
 ```
+
+### 8. i.MX8MP 実機でのアテステーション
+
+本セクションでは i.MX8MP EVK 実機上で PSA Remote Attestation を実行し、
+Veraison で検証する手順を説明します。埋め込みテスト鍵、CAAM ブラックキー新規生成、
+既存鍵の変換の 3 つのシナリオを扱います。
+
+#### 前提条件
+
+| 項目 | 詳細 |
+|------|------|
+| ボード | i.MX8MP EVK |
+| ビルド | `core-image-minimal` (Yocto + OP-TEE + veraison-attestation PTA) |
+| Veraison | Docker デプロイメント (`services/deployments/docker/`) |
+| ネットワーク | デバイスと Veraison ホストが IP 到達可能 |
+| SD カード | imx-boot と rootfs の両方を含む WIC イメージ |
+
+> **重要**: i.MX8MP は SD カード先頭の imx-boot 内の `tee.bin` を使用します。
+> rootfs 上の `/usr/lib/firmware/tee.bin` を更新しても Secure World には
+> 反映されません。PTA のコード変更を反映するには **imx-boot を含む WIC イメージ全体**
+> を再フラッシュする必要があります。
+
+デバイス側で Veraison ホストを `/etc/hosts` に追加:
+```bash
+echo "<Veraison_Host_IP> relying-party-service" >> /etc/hosts
+```
+
+Veraison ホスト側でサービスを起動:
+```bash
+services/deployments/docker/veraison start
+source services/deployments/docker/env.bash
+```
+
+#### Provisioning ヘルパー: Instance ID と PEM 公開鍵の計算
+
+全シナリオ共通で `instance-id = 0x01 || SHA-256(0x04 || PubX || PubY)` です。
+CAAM 鍵を使う場合（シナリオ B, C）は、ホスト側で PubX/PubY から instance ID と
+PEM 公開鍵を計算します:
+
+```bash
+python3 -c "
+import hashlib, base64
+pub_x = bytes.fromhex('<PubX hex>')
+pub_y = bytes.fromhex('<PubY hex>')
+digest = hashlib.sha256(b'\x04' + pub_x + pub_y).digest()
+instance_id = b'\x01' + digest
+print('instance_id (base64):', base64.b64encode(instance_id).decode())
+"
+```
+
+```bash
+python3 -c "
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
+pub_x = bytes.fromhex('<PubX hex>')
+pub_y = bytes.fromhex('<PubY hex>')
+pub_numbers = ec.EllipticCurvePublicNumbers(
+    x=int.from_bytes(pub_x, 'big'),
+    y=int.from_bytes(pub_y, 'big'),
+    curve=ec.SECP256R1()
+)
+pub_key = pub_numbers.public_key()
+pem = pub_key.public_bytes(
+    serialization.Encoding.PEM,
+    serialization.PublicFormat.SubjectPublicKeyInfo
+).decode()
+print(pem.strip())
+"
+```
+
+計算した値で `provisoning/data/comid-psa-ta.json` の `instance` と
+`verification-keys` を更新してください。
+
+#### 8.1 シナリオ A: 埋め込みテスト鍵
+
+PTA に埋め込まれたテスト用 ECDSA P-256 鍵で evidence に署名します。
+デバイス側での鍵管理は不要です。
+
+| 項目 | 値 |
+|------|-----|
+| PubX | `30a0424cd21c2944838a2d75c92b37e76ea20d9f00893a3b4eee8a3c0aafec3e` |
+| PubY | `e04b65e92456d9888b52b379bdfbd51ee869ef1f0fc65b6659695b6cce081723` |
+| Instance ID | `AZDHHoAwT5jWVWpALAWTszqArL0I5K/5xAKfbhfhA5lR` |
+
+**Provisioning**:
+```bash
+services/deployments/docker/veraison clear-stores
+./provisoning/run.sh imx
+```
+
+デフォルトの `comid-psa-ta.json` にはテスト鍵の trust anchor が設定済みです。
+
+**Attestation 実行** (デバイス側):
+```bash
+optee_remote_attestation
+```
+
+期待される結果: `"ear.status": "affirming"`
+
+#### 8.2 シナリオ B: CAAM ブラックキー — 新規鍵生成
+
+CAAM モジュールで新しい ECDSA P-256 鍵ペアを生成します。
+秘密鍵は JDKEK で暗号化されており、プレーンテキストではメモリ上に露出しません。
+
+> **注意**: ブラックキーは JDKEK (揮発性) で暗号化されています。
+> 電源サイクルで JDKEK が再生成されるため、**同一ブートセッション内でのみ使用可能**です。
+
+**手順 1 — 鍵生成** (デバイス側):
+```bash
+optee_remote_attestation --generate-blackkey
+```
+
+出力例:
+```
+Generating new black key...
+BlackKey(hex): fbbfafca020000002000000...
+PubX(hex): 3d87f38e7b34e5c0bc988becb225783daa4d14dc0031f49588fe61708c4f1f6f
+PubY(hex): 15dc6990d4209e3cb1f732310a4784a535a93962b7d87274286026ec80153ce4
+FullKey(hex): 3d87f38e7b34e5c0...fbbfafca020000002000000...
+Black key generation completed.
+```
+
+**手順 2 — Provisioning** (ホスト側): PubX/PubY から instance ID と PEM 公開鍵を
+計算し（上記ヘルパー参照）、`comid-psa-ta.json` を更新後:
+```bash
+services/deployments/docker/veraison clear-stores
+./provisoning/run.sh imx
+```
+
+**手順 3 — Attestation 実行** (デバイス側): FullKey をそのまま渡す:
+```bash
+optee_remote_attestation --key-hex <FullKey hex>
+```
+
+または各コンポーネントを個別に渡す:
+```bash
+optee_remote_attestation --key-hex <BlackKey hex> --pubx-hex <PubX hex> --puby-hex <PubY hex>
+```
+
+期待される結果: `"ear.status": "affirming"`
+
+#### 8.3 シナリオ C: CAAM ブラックキー — 既存鍵の変換
+
+既存のプレーンテキスト ECDSA P-256 秘密鍵（32 バイトの `d` 値）を
+CAAM ブラックキーに変換します。OpenSSL 等で生成済みの鍵ペアがある場合に使用します。
+
+**手順 1 — 鍵変換** (デバイス側):
+```bash
+optee_remote_attestation --convert-key <32バイト秘密鍵 hex>
+```
+
+出力例:
+```
+Converting plain key to black key...
+BlackKey(hex): fbbfafca020000002000000...
+Key conversion completed.
+```
+
+公開鍵 (PubX/PubY) は出力されません。元の鍵ペアから既知のためです。
+
+**手順 2 — Provisioning** (ホスト側): 既知の PubX/PubY から instance ID と
+PEM 公開鍵を計算し（上記ヘルパー参照）、`comid-psa-ta.json` を更新後:
+```bash
+services/deployments/docker/veraison clear-stores
+./provisoning/run.sh imx
+```
+
+**手順 3 — Attestation 実行** (デバイス側):
+```bash
+optee_remote_attestation --key-hex <BlackKey hex> --pubx-hex <PubX hex> --puby-hex <PubY hex>
+```
+
+期待される結果: `"ear.status": "affirming"`
 
 ## 謝辞
 研究は、JST、CREST、JPMJCR21M3 ([Zero Trust IoT プロジェクト](https://zt-iot.nii.ac.jp/)) の支援を受けたものです。
