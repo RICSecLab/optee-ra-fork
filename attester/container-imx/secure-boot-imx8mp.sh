@@ -142,9 +142,10 @@ IMG_DIR=/out/img
 LOG_DIR=/out/logs
 mkdir -p "$KEY_DIR" "$CSF_DIR" "$IMG_DIR" "$LOG_DIR"
 
-# Generate PKI tree (test keys)
+# Generate PKI tree (test keys) non-interactively
 if [ ! -f "$KEY_DIR/SRK_1_2_3_4_table.bin" ]; then
-  (cd "$KEY_DIR" && "$PKI_SCRIPT" -n SRK -p "$CST_PASS")
+  # Answers: existing CA? n, ECC? n, key length 2048, duration 10y, SRK count 4, SRK CA? y
+  printf "n\nn\n2048\n10\n4\ny\n" | (cd "$KEY_DIR" && /bin/sh "$PKI_SCRIPT")
   "$SRKTOOL" -h 4 \
     -t "$KEY_DIR/SRK_1_2_3_4_table.bin" \
     -e "$KEY_DIR/SRK_1_2_3_4_fuse.bin" \
