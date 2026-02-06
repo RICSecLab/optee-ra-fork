@@ -144,15 +144,24 @@ mkdir -p "$KEY_DIR" "$CSF_DIR" "$IMG_DIR" "$LOG_DIR"
 
 # Generate PKI tree (test keys) non-interactively
 if [ ! -f "$KEY_DIR/SRK_1_2_3_4_table.bin" ]; then
+  PKI_WORK="$CST_ROOT/keys"
+  CRT_DIR="$CST_ROOT/crts"
+
   # Answers: existing CA? n, ECC? n, key length 2048, duration 10y, SRK count 4, SRK CA? y
-  printf "n\nn\n2048\n10\n4\ny\n" | (cd "$KEY_DIR" && /bin/sh "$PKI_SCRIPT")
+  printf "n\nn\n2048\n10\n4\ny\n" | (cd "$PKI_WORK" && /bin/sh "$PKI_SCRIPT")
+
   "$SRKTOOL" -h 4 \
     -t "$KEY_DIR/SRK_1_2_3_4_table.bin" \
     -e "$KEY_DIR/SRK_1_2_3_4_fuse.bin" \
-    -d "$KEY_DIR/SRK1_sha256_2048_65537_v3_ca_crt.pem",\
-"$KEY_DIR/SRK2_sha256_2048_65537_v3_ca_crt.pem",\
-"$KEY_DIR/SRK3_sha256_2048_65537_v3_ca_crt.pem",\
-"$KEY_DIR/SRK4_sha256_2048_65537_v3_ca_crt.pem"
+    -d "$CRT_DIR/SRK1_sha256_2048_65537_v3_ca_crt.pem",\
+"$CRT_DIR/SRK2_sha256_2048_65537_v3_ca_crt.pem",\
+"$CRT_DIR/SRK3_sha256_2048_65537_v3_ca_crt.pem",\
+"$CRT_DIR/SRK4_sha256_2048_65537_v3_ca_crt.pem"
+
+  # Copy generated keys/certs for reference
+  cp -f "$CRT_DIR"/SRK*_sha256_2048_65537_v3_ca_crt.pem "$KEY_DIR"/
+  cp -f "$CRT_DIR"/CSF*_sha256_2048_65537_v3_usr_crt.pem "$KEY_DIR"/
+  cp -f "$CRT_DIR"/IMG*_sha256_2048_65537_v3_usr_crt.pem "$KEY_DIR"/
 fi
 
 IMX_MKIMG_DIR=/yocto/build/tmp/work/imx8mpevk-poky-linux/imx-boot/1.0/git
@@ -179,6 +188,7 @@ sld_addr=$(echo "$sld_line" | awk "{print \$3}")
 sld_off=$(echo "$sld_line" | awk "{print \$4}")
 sld_size=$(echo "$sld_line" | awk "{print \$5}")
 
+CRT_DIR="$CST_ROOT/crts"
 cat > "$CSF_DIR/csf_spl.txt" <<CSF_EOF
 [Header]
 Version = 4.3
@@ -193,12 +203,12 @@ File = "$KEY_DIR/SRK_1_2_3_4_table.bin"
 Source index = 0
 
 [Install CSFK]
-File = "$KEY_DIR/CSF1_1_sha256_2048_65537_v3_usr_crt.pem"
+File = "$CRT_DIR/CSF1_1_sha256_2048_65537_v3_usr_crt.pem"
 
 [Authenticate CSF]
 
 [Install KEY]
-File = "$KEY_DIR/IMG1_1_sha256_2048_65537_v3_usr_crt.pem"
+File = "$CRT_DIR/IMG1_1_sha256_2048_65537_v3_usr_crt.pem"
 
 [Authenticate Data]
 Verification index = 0
