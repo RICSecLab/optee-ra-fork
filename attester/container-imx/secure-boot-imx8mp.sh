@@ -112,19 +112,24 @@ docker run --rm \
   /bin/bash -c '
 set -euo pipefail
 
-if [ -f /opt/cst.tar.gz ]; then
-  mkdir -p /opt/cst
-  tar -xf /opt/cst.tar.gz -C /opt/cst --strip-components=1
+if [ -x /opt/cst/linux64/bin/cst ]; then
+  CST_ROOT=/opt/cst
+elif [ -f /opt/cst.tar.gz ]; then
+  mkdir -p /tmp/cst
+  tar -xf /opt/cst.tar.gz -C /tmp/cst --strip-components=1
+  CST_ROOT=/tmp/cst
+else
+  CST_ROOT=""
 fi
 
-if [ ! -x /opt/cst/linux64/bin/cst ]; then
+if [ -z "$CST_ROOT" ] || [ ! -x "$CST_ROOT/linux64/bin/cst" ]; then
   echo "CST not found. Provide --cst-tar or --cst-dir with linux64/bin/cst" >&2
   exit 1
 fi
 
-CST_BIN=/opt/cst/linux64/bin/cst
-SRKTOOL=/opt/cst/linux64/bin/srktool
-PKI_SCRIPT=/opt/cst/keys/hab4_pki_tree.sh
+CST_BIN="$CST_ROOT/linux64/bin/cst"
+SRKTOOL="$CST_ROOT/linux64/bin/srktool"
+PKI_SCRIPT="$CST_ROOT/keys/hab4_pki_tree.sh"
 
 if [ ! -x "$PKI_SCRIPT" ]; then
   echo "hab4_pki_tree.sh not found in CST package" >&2
@@ -254,4 +259,3 @@ if [ -n "$PATCH_WIC" ]; then
     echo "Patched WIC: $WIC_RAW"
   fi
 fi
-
