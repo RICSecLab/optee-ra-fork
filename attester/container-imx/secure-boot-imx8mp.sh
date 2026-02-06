@@ -160,7 +160,7 @@ if [ ! -f "$KEY_DIR/SRK_1_2_3_4_table.bin" ]; then
     echo "createSRKTable not found in CST package" >&2
     exit 1
   fi
-  (cd "$KEY_DIR" && "$CREATE_SRK" 4 \
+  (cd "$KEY_DIR" && /bin/bash "$CREATE_SRK" 4 \
     "$KEY_DIR/SRK1_sha256_2048_65537_v3_ca_crt.pem" \
     "$KEY_DIR/SRK2_sha256_2048_65537_v3_ca_crt.pem" \
     "$KEY_DIR/SRK3_sha256_2048_65537_v3_ca_crt.pem" \
