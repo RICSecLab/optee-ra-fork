@@ -92,7 +92,7 @@ UsefulBufC generate_cose(UsefulBufC ubc_cbor_evidence,
     UsefulBufC protected_parameter =
         encode_protected_parameter(buffer_for_protected_parameter);
     if (UsefulBuf_IsNULLC(protected_parameter)) {
-        DMSG("Failed to encode protected header payload");
+        EMSG("Failed to encode protected header payload");
         return NULLUsefulBufC;
     }
 
@@ -111,7 +111,7 @@ UsefulBufC generate_cose(UsefulBufC ubc_cbor_evidence,
     UsefulBufC tbs_payload = create_tbs(protected_parameter, NULLUsefulBufC,
                                         ubc_cbor_evidence, buffer_for_tbs);
     if (UsefulBuf_IsNULLC(tbs_payload)) {
-        DMSG("Failed to encode to-be-signed payload");
+        EMSG("Failed to encode to-be-signed payload");
         return NULLUsefulBufC;
     }
 
@@ -121,7 +121,7 @@ UsefulBufC generate_cose(UsefulBufC ubc_cbor_evidence,
     if (sign_ecdsa_sha256(tbs_payload.ptr, tbs_payload.len, signature,
                           &signature_len, serialized_black_key,
                           serialized_black_key_len) != TEE_SUCCESS) {
-        DMSG("Failed to sign payload");
+        EMSG("Failed to sign payload");
         return NULLUsefulBufC;
     }
 

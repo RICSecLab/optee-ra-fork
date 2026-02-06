@@ -1,7 +1,6 @@
 #include <kernel/pseudo_ta.h>
 #include <pta_remote_attestation.h>
 
-#include "base64.h"
 #include "cbor.h"
 #include "hash.h"
 #include "sign.h"
@@ -88,8 +87,6 @@ static TEE_Result cmd_get_cbor_evidence(uint32_t param_types,
     uint8_t pub_y[PUBKEY_COORD_SIZE] = {0};
 
     uint8_t measurement_value[TEE_SHA256_HASH_SIZE] = {0};
-    size_t b64_measurement_value_len = TEE_SHA256_HASH_SIZE * 2;
-    char b64_measurement_value[TEE_SHA256_HASH_SIZE * 2] = {0};
 
     /* Accept output buffer as INOUT or OUTPUT, with/without optional key */
     if (param_types != TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
@@ -155,15 +152,6 @@ static TEE_Result cmd_get_cbor_evidence(uint32_t param_types,
     if (status != TEE_SUCCESS)
         return status;
 
-    /* For debug print */
-    if (base64_encode(measurement_value, TEE_SHA256_HASH_SIZE,
-                      b64_measurement_value, &b64_measurement_value_len) != 1) {
-        DMSG("Failed to encode measurement_value to base64");
-        return TEE_ERROR_GENERIC;
-    }
-    b64_measurement_value[b64_measurement_value_len] = '\0';
-    DMSG("b64_measurement_value: %s", b64_measurement_value);
-
     /* Encode evidence to CBOR */
     UsefulBuf_MAKE_STACK_UB(buffuer_for_cbor, 512);
     UsefulBufC ubc_cbor_evidence = encode_evidence_to_cbor(
@@ -172,7 +160,7 @@ static TEE_Result cmd_get_cbor_evidence(uint32_t param_types,
         signer_id, SIGNER_ID_LEN, psa_instance_id, INSTANCE_ID_LEN, nonce,
         nonce_sz, measurement_value, TEE_SHA256_HASH_SIZE, buffuer_for_cbor);
     if (UsefulBuf_IsNULLC(ubc_cbor_evidence)) {
-        DMSG("Failed to encode evidence to CBOR");
+        EMSG("Failed to encode evidence to CBOR");
         return TEE_ERROR_GENERIC;
     }
 
@@ -182,7 +170,7 @@ static TEE_Result cmd_get_cbor_evidence(uint32_t param_types,
         generate_cose(ubc_cbor_evidence, buffer_for_cose,
                       serialized_black_key, serialized_black_key_len);
     if (UsefulBuf_IsNULLC(cose_evidence)) {
-        DMSG("Failed to encode CBOR to COSE");
+        EMSG("Failed to encode CBOR to COSE");
         return TEE_ERROR_GENERIC;
     }
 

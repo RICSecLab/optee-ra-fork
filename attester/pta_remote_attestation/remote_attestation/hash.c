@@ -89,7 +89,6 @@ static TEE_Result hash_regions(struct vm_info *vm_info, uint8_t *hash)
     /* Hash regions in order */
     for (i = 0; i < nregions; i++) {
         r = regions[i];
-        DMSG("va %p size %zu", (void *)r->va, r->size);
         res = crypto_hash_update(ctx, (uint8_t *)r->va, r->size);
         if (res)
             break;

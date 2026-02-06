@@ -127,11 +127,6 @@ TEE_Result sign_ecdsa_sha256(const uint8_t *msg, size_t msg_len, uint8_t *sig,
     if (pubkey) {
         res = crypto_acipher_ecc_verify(TEE_ALG_ECDSA_SHA256, pubkey, hash_msg,
                                         TEE_SHA256_HASH_SIZE, sig, *sig_len);
-        if (res == TEE_SUCCESS) {
-            DMSG("Success to verify");
-        } else {
-            DMSG("Failed to verify");
-        }
         /* Reset res to success even if verify fails - we still signed */
         res = TEE_SUCCESS;
     }
