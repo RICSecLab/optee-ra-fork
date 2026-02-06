@@ -128,7 +128,6 @@ if [ -z "$CST_ROOT" ] || [ ! -x "$CST_ROOT/linux64/bin/cst" ]; then
 fi
 
 CST_BIN="$CST_ROOT/linux64/bin/cst"
-SRKTOOL="$CST_ROOT/linux64/bin/srktool"
 PKI_SCRIPT="$CST_ROOT/keys/hab4_pki_tree.sh"
 
 if [ ! -x "$PKI_SCRIPT" ]; then
@@ -150,18 +149,23 @@ if [ ! -f "$KEY_DIR/SRK_1_2_3_4_table.bin" ]; then
   # Answers: existing CA? n, ECC? n, key length 2048, duration 10y, SRK count 4, SRK CA? y
   printf "n\nn\n2048\n10\n4\ny\n" | (cd "$PKI_WORK" && /bin/sh "$PKI_SCRIPT")
 
-  "$SRKTOOL" -h 4 \
-    -t "$KEY_DIR/SRK_1_2_3_4_table.bin" \
-    -e "$KEY_DIR/SRK_1_2_3_4_fuse.bin" \
-    -d "$CRT_DIR/SRK1_sha256_2048_65537_v3_ca_crt.pem",\
-"$CRT_DIR/SRK2_sha256_2048_65537_v3_ca_crt.pem",\
-"$CRT_DIR/SRK3_sha256_2048_65537_v3_ca_crt.pem",\
-"$CRT_DIR/SRK4_sha256_2048_65537_v3_ca_crt.pem"
-
-  # Copy generated keys/certs for reference
+  # Copy generated certs for reference
   cp -f "$CRT_DIR"/SRK*_sha256_2048_65537_v3_ca_crt.pem "$KEY_DIR"/
   cp -f "$CRT_DIR"/CSF*_sha256_2048_65537_v3_usr_crt.pem "$KEY_DIR"/
   cp -f "$CRT_DIR"/IMG*_sha256_2048_65537_v3_usr_crt.pem "$KEY_DIR"/
+
+  # Generate SRK table (HAB4) without srktool
+  CREATE_SRK="$CST_ROOT/code/hab_srktool_scripts/createSRKTable"
+  if [ ! -x "$CREATE_SRK" ]; then
+    echo "createSRKTable not found in CST package" >&2
+    exit 1
+  fi
+  (cd "$KEY_DIR" && "$CREATE_SRK" 4 \
+    "$KEY_DIR/SRK1_sha256_2048_65537_v3_ca_crt.pem" \
+    "$KEY_DIR/SRK2_sha256_2048_65537_v3_ca_crt.pem" \
+    "$KEY_DIR/SRK3_sha256_2048_65537_v3_ca_crt.pem" \
+    "$KEY_DIR/SRK4_sha256_2048_65537_v3_ca_crt.pem")
+  mv -f "$KEY_DIR/SRK_table.bin" "$KEY_DIR/SRK_1_2_3_4_table.bin"
 fi
 
 IMX_MKIMG_DIR=/yocto/build/tmp/work/imx8mpevk-poky-linux/imx-boot/1.0/git
