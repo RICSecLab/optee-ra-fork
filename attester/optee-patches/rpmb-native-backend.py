@@ -165,6 +165,7 @@ PROBE_RESET_NEW = """static TEE_Result rpmb_probe_reset(void)
 	rpmb_ctx->legacy_operation = false;
 	rpmb_ctx->dev_id = 0;
 	rpmb_ctx->shm_type = THREAD_SHM_TYPE_KERNEL_PRIVATE;
+	rpmb_ctx->native_probe_done = false;
 
 	return TEE_SUCCESS;
 #endif
@@ -182,17 +183,43 @@ PROBE_NEXT_NEW = """	struct thread_param params[2] = { };
 	void *va = NULL;
 
 #if defined(CFG_IMX_RPMB_NATIVE)
+	/*
+	 * There is exactly one device behind this driver. The caller walks
+	 * the probe until it either finds a usable device or gets an error,
+	 * so the second call has to report that the list is exhausted -
+	 * otherwise a device that cannot be used (no authentication key
+	 * programmed, say) would spin the caller forever.
+	 */
+	if (rpmb_ctx->native_probe_done)
+		return TEE_ERROR_ITEM_NOT_FOUND;
+
 	*dev_info = (struct rpmb_dev_info){
 		.ret_code = RPMB_CMD_GET_DEV_INFO_RET_OK,
 	};
 
-	return imx_usdhc_dev_info(dev_info->cid, &dev_info->rpmb_size_mult,
-				  &dev_info->rel_wr_sec_c);
+	res = imx_usdhc_dev_info(dev_info->cid, &dev_info->rpmb_size_mult,
+				 &dev_info->rel_wr_sec_c);
+	if (!res)
+		rpmb_ctx->native_probe_done = true;
+
+	return res;
+#endif
+"""
+
+# Context flag backing the single-device probe above.
+CTX_OLD = """	bool legacy_operation;
+"""
+
+CTX_NEW = """	bool legacy_operation;
+#if defined(CFG_IMX_RPMB_NATIVE)
+	/* The single device behind the core driver has been reported. */
+	bool native_probe_done;
 #endif
 """
 
 EDITS = [
     (INCLUDE_OLD, INCLUDE_NEW),
+    (CTX_OLD, CTX_NEW),
     (ALLOC_OLD, ALLOC_NEW),
     (INVOKE_OLD, INVOKE_NEW),
     (INVOKE_BODY_OLD, INVOKE_BODY_NEW),
