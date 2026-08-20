@@ -69,6 +69,8 @@ register_phys_mem_pgdir(MEM_AREA_IO_SEC, IOMUXC_BASE, CORE_MMU_PGDIR_SIZE);
 #define PRSSTAT_DLA		BIT32(2)
 #define PRSSTAT_BREN		BIT32(11)
 #define PRSSTAT_BWEN		BIT32(10)
+/* DAT0 line level: the card pulls it low while it is programming. */
+#define PRSSTAT_DAT0_LEVEL	BIT32(24)
 
 #define SYSCTL_INITA		BIT32(27)
 #define SYSCTL_RSTA		BIT32(24)
@@ -128,6 +130,7 @@ register_phys_mem_pgdir(MEM_AREA_IO_SEC, IOMUXC_BASE, CORE_MMU_PGDIR_SIZE);
 
 #define EXT_CSD_PART_ACCESS_MASK	0x7
 #define EXT_CSD_PART_ACCESS_RPMB	0x3
+#define EXT_CSD_PART_ACCESS_USER	0x0
 
 #define CMD_TIMEOUT_US			1000000
 #define DATA_TIMEOUT_US			5000000
@@ -574,7 +577,25 @@ static TEE_Result switch_partition(uint8_t part)
 	return TEE_SUCCESS;
 }
 
-static TEE_Result rpmb_xfer(void *buf, size_t nblocks, bool write)
+/* Wait for the card to release DAT0, which it holds low while programming. */
+static TEE_Result wait_card_ready(void)
+{
+	vaddr_t base = usdhc_base();
+	uint64_t tref = timeout_init_us(DATA_TIMEOUT_US);
+
+	do {
+		if (io_read32(base + USDHC_PRSSTAT) & PRSSTAT_DAT0_LEVEL)
+			return TEE_SUCCESS;
+	} while (!timeout_elapsed(tref));
+
+	EMSG("card stayed busy, PRSSTAT %#"PRIx32,
+	     io_read32(base + USDHC_PRSSTAT));
+
+	return TEE_ERROR_BUSY;
+}
+
+static TEE_Result rpmb_xfer(void *buf, size_t nblocks, bool write,
+			    bool reliable)
 {
 	struct mmc_cmd cmd = { };
 	TEE_Result res = TEE_SUCCESS;
@@ -587,12 +608,18 @@ static TEE_Result rpmb_xfer(void *buf, size_t nblocks, bool write)
 	if (res)
 		return res;
 
+	res = wait_card_ready();
+	if (res)
+		return res;
+
 	/*
-	 * SET_BLOCK_COUNT with bit 31 set marks a reliable write, which the
-	 * RPMB protocol requires for authenticated data writes.
+	 * Bit 31 of SET_BLOCK_COUNT marks a reliable write. It belongs on
+	 * authenticated data writes and on key programming only: request
+	 * frames that ask the device for something are plain writes, and
+	 * marking those reliable makes the device ignore the transfer.
 	 */
 	cmd = (struct mmc_cmd){ .idx = MMC_CMD_SET_BLOCK_COUNT,
-				.arg = nblocks | (write ? BIT32(31) : 0),
+				.arg = nblocks | (reliable ? BIT32(31) : 0),
 				.xfertyp = XFERTYP_RSPTYP_48 | XFERTYP_CCCEN |
 					   XFERTYP_CICEN };
 	res = send_cmd(&cmd);
@@ -607,7 +634,17 @@ static TEE_Result rpmb_xfer(void *buf, size_t nblocks, bool write)
 				.data = buf, .blocks = nblocks,
 				.write = write };
 
-	return send_cmd(&cmd);
+	res = send_cmd(&cmd);
+
+	/*
+	 * Leave the device on the user partition. Whoever looks at this eMMC
+	 * next - U-Boot, Linux - expects to find it there, and a card left in
+	 * RPMB access mode answers their reads with errors.
+	 */
+	if (switch_partition(EXT_CSD_PART_ACCESS_USER) && !res)
+		res = TEE_ERROR_GENERIC;
+
+	return res;
 }
 
 TEE_Result imx_usdhc_init(void)
@@ -691,10 +728,19 @@ TEE_Result imx_usdhc_dev_info(uint8_t *cid, uint8_t *rpmb_size_mult,
 
 TEE_Result imx_usdhc_rpmb_read(void *buf, size_t nblocks)
 {
-	return rpmb_xfer(buf, nblocks, false);
+	return rpmb_xfer(buf, nblocks, false, false);
 }
 
-TEE_Result imx_usdhc_rpmb_write(const void *buf, size_t nblocks)
+TEE_Result imx_usdhc_rpmb_write(const void *buf, size_t nblocks, bool reliable)
 {
-	return rpmb_xfer((void *)buf, nblocks, true);
+	TEE_Result res = rpmb_xfer((void *)buf, nblocks, true, reliable);
+
+	if (res)
+		return res;
+
+	/*
+	 * The device programs the data after the transfer completes; the next
+	 * command must not arrive while it is still busy.
+	 */
+	return wait_card_ready();
 }
