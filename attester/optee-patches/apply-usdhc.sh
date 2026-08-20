@@ -40,7 +40,13 @@ CFG_DDR_SIZE ?= UL(0x180000000)"""
 
 addition = """ifneq (,$(filter $(PLATFORM_FLAVOR),mx8mpevk))
 CFG_DDR_SIZE ?= UL(0x180000000)
-# On-board eMMC (uSDHC3): used by the OP-TEE core RPMB backend
+# Route OP-TEE secure storage RPMB traffic through the core driver rather
+# than tee-supplicant. Implies the driver below, so it comes first.
+CFG_IMX_RPMB_NATIVE ?= n
+ifeq ($(CFG_IMX_RPMB_NATIVE),y)
+$(call force,CFG_IMX_USDHC,y)
+endif
+# On-board eMMC (uSDHC3)
 CFG_IMX_USDHC ?= n
 CFG_IMX_USDHC_TEST ?= n
 CFG_IMX_USDHC_BASE ?= 0x30b60000
@@ -54,5 +60,7 @@ if anchor not in text:
 open(path, "w").write(text.replace(anchor, addition, 1))
 EOF
 fi
+
+python3 "$HERE/rpmb-native-backend.py" "$SRC/core/tee/tee_rpmb_fs.c"
 
 echo "uSDHC driver wired into $SRC"

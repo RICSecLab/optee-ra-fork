@@ -123,6 +123,7 @@ register_phys_mem_pgdir(MEM_AREA_IO_SEC, IOMUXC_BASE, CORE_MMU_PGDIR_SIZE);
 /* EXT_CSD fields we care about */
 #define EXT_CSD_PART_CONF		179
 #define EXT_CSD_RPMB_MULT		168
+#define EXT_CSD_REL_WR_SEC_C		222
 #define EXT_CSD_SIZE			512
 
 #define EXT_CSD_PART_ACCESS_MASK	0x7
@@ -136,6 +137,8 @@ struct usdhc_ctx {
 	vaddr_t base;
 	uint32_t rca;
 	uint8_t rpmb_mult;
+	uint8_t rel_wr_sec_c;
+	uint8_t cid[IMX_USDHC_CID_SIZE];
 	uint8_t cur_part;
 	bool inited;
 };
@@ -439,6 +442,7 @@ static TEE_Result card_identify(void)
 {
 	struct mmc_cmd cmd = { };
 	uint64_t tref = 0;
+	size_t i = 0;
 	TEE_Result res = TEE_SUCCESS;
 
 	cmd = (struct mmc_cmd){ .idx = MMC_CMD_GO_IDLE_STATE, .arg = 0,
@@ -485,6 +489,20 @@ static TEE_Result card_identify(void)
 
 	IMSG("eMMC CID %08"PRIx32"%08"PRIx32"%08"PRIx32"%08"PRIx32,
 	     cmd.resp[3], cmd.resp[2], cmd.resp[1], cmd.resp[0]);
+
+	/*
+	 * The controller strips the CRC byte, so the response holds the CID
+	 * shifted right by 8 bits. Rebuild the 16-byte CID the RPMB layer
+	 * compares against, most significant byte first.
+	 */
+	for (i = 0; i < 4; i++) {
+		uint32_t w = cmd.resp[3 - i];
+
+		usdhc_ctx.cid[i * 4] = w >> 24;
+		usdhc_ctx.cid[i * 4 + 1] = w >> 16;
+		usdhc_ctx.cid[i * 4 + 2] = w >> 8;
+		usdhc_ctx.cid[i * 4 + 3] = w;
+	}
 
 	cmd = (struct mmc_cmd){ .idx = MMC_CMD_SET_RELATIVE_ADDR,
 				.arg = SHIFT_U32(usdhc_ctx.rca, 16),
@@ -632,6 +650,7 @@ TEE_Result imx_usdhc_init(void)
 	}
 
 	usdhc_ctx.rpmb_mult = ext_csd[EXT_CSD_RPMB_MULT];
+	usdhc_ctx.rel_wr_sec_c = ext_csd[EXT_CSD_REL_WR_SEC_C];
 	usdhc_ctx.inited = true;
 
 	IMSG("uSDHC eMMC ready, RPMB size %u KiB",
@@ -648,6 +667,24 @@ TEE_Result imx_usdhc_rpmb_size(uint8_t *mult)
 		return res;
 
 	*mult = usdhc_ctx.rpmb_mult;
+
+	return TEE_SUCCESS;
+}
+
+TEE_Result imx_usdhc_dev_info(uint8_t *cid, uint8_t *rpmb_size_mult,
+			      uint8_t *rel_wr_sec_c)
+{
+	TEE_Result res = imx_usdhc_init();
+
+	if (res)
+		return res;
+
+	if (cid)
+		memcpy(cid, usdhc_ctx.cid, sizeof(usdhc_ctx.cid));
+	if (rpmb_size_mult)
+		*rpmb_size_mult = usdhc_ctx.rpmb_mult;
+	if (rel_wr_sec_c)
+		*rel_wr_sec_c = usdhc_ctx.rel_wr_sec_c;
 
 	return TEE_SUCCESS;
 }
