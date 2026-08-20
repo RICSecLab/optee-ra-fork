@@ -24,6 +24,16 @@ TEE_Result imx_usdhc_init(void);
 TEE_Result imx_usdhc_rpmb_size(uint8_t *mult);
 
 /*
+ * Identification of the attached device, in the form the RPMB layer needs:
+ * the raw CID, the RPMB size multiplier (EXT_CSD 168) and the reliable
+ * write sector count (EXT_CSD 222). Any output pointer may be NULL.
+ */
+#define IMX_USDHC_CID_SIZE	16
+
+TEE_Result imx_usdhc_dev_info(uint8_t *cid, uint8_t *rpmb_size_mult,
+			      uint8_t *rel_wr_sec_c);
+
+/*
  * Read or write @nblocks of IMX_USDHC_BLOCK_SIZE bytes on the RPMB
  * partition. The caller passes complete RPMB data frames; authentication
  * is done by the RPMB layer, not here.
