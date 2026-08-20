@@ -100,7 +100,8 @@ static TEE_Result rpmb_native_invoke(struct tee_rpmb_mem *mem)
 	switch (msg_type) {
 	case RPMB_MSG_TYPE_REQ_AUTH_KEY_PROGRAM:
 	case RPMB_MSG_TYPE_REQ_AUTH_DATA_WRITE:
-		res = imx_usdhc_rpmb_write(req, req_blocks);
+		/* Authenticated writes are the reliable-write case. */
+		res = imx_usdhc_rpmb_write(req, req_blocks, true);
 		if (res)
 			return res;
 
@@ -108,14 +109,15 @@ static TEE_Result rpmb_native_invoke(struct tee_rpmb_mem *mem)
 		memset(mem->resp_data, 0, mem->resp_size);
 		u16_to_bytes(RPMB_MSG_TYPE_REQ_RESULT_READ,
 			     mem->resp_data[0].msg_type);
-		res = imx_usdhc_rpmb_write(mem->resp_data, 1);
+		res = imx_usdhc_rpmb_write(mem->resp_data, 1, false);
 		if (res)
 			return res;
 
 		return imx_usdhc_rpmb_read(mem->resp_data, 1);
 
 	default:
-		res = imx_usdhc_rpmb_write(req, req_blocks);
+		/* A request frame is a plain write, not a reliable one. */
+		res = imx_usdhc_rpmb_write(req, req_blocks, false);
 		if (res)
 			return res;
 

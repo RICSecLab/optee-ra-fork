@@ -9,6 +9,7 @@
 #ifndef __DRIVERS_IMX_USDHC_H
 #define __DRIVERS_IMX_USDHC_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <tee_api_types.h>
 
@@ -39,6 +40,13 @@ TEE_Result imx_usdhc_dev_info(uint8_t *cid, uint8_t *rpmb_size_mult,
  * is done by the RPMB layer, not here.
  */
 TEE_Result imx_usdhc_rpmb_read(void *buf, size_t nblocks);
-TEE_Result imx_usdhc_rpmb_write(const void *buf, size_t nblocks);
+
+/*
+ * @reliable marks the transfer as a reliable write, which the eMMC requires
+ * for authenticated data writes and for programming the key. Request frames
+ * that merely ask the device for something must not set it.
+ */
+TEE_Result imx_usdhc_rpmb_write(const void *buf, size_t nblocks,
+				bool reliable);
 
 #endif /* __DRIVERS_IMX_USDHC_H */
