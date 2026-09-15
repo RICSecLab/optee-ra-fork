@@ -49,9 +49,11 @@ endif
 # On-board eMMC (uSDHC3)
 CFG_IMX_USDHC ?= n
 CFG_IMX_USDHC_TEST ?= n
+# Per-transfer register dumps (slow over the console; failures always dump)
+CFG_IMX_USDHC_VERBOSE ?= n
 CFG_IMX_USDHC_BASE ?= 0x30b60000
 # CCM clock gate index and root clock register for uSDHC3
-CFG_IMX_USDHC_CCM_CCGR ?= 83
+CFG_IMX_USDHC_CCM_CCGR ?= 94
 CFG_IMX_USDHC_CCM_TARGET ?= 0xbc80"""
 
 if anchor not in text:

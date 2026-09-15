@@ -6,9 +6,11 @@
  * driver can be validated before any RPMB traffic depends on it.
  */
 
+#include <config.h>
 #include <drivers/imx_usdhc.h>
 #include <initcall.h>
 #include <trace.h>
+#include <util.h>
 
 static TEE_Result imx_usdhc_smoke_test(void)
 {
@@ -51,6 +53,9 @@ static TEE_Result imx_usdhc_smoke_test(void)
 
 	IMSG("USDHC-TEST: PASS, RPMB frame read (resp %02x%02x, result %02x%02x)",
 	     frame[510], frame[511], frame[508], frame[509]);
+
+	if (IS_ENABLED(CFG_IMX_USDHC_VERBOSE))
+		imx_usdhc_benchmark();
 
 	return TEE_SUCCESS;
 }

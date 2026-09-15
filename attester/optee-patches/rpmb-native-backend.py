@@ -84,7 +84,31 @@ INVOKE_NEW = """#if defined(CFG_IMX_RPMB_NATIVE)
  * always followed by a result-read frame, which is what the RPMB layer
  * expects to find in the response buffer.
  */
-static TEE_Result rpmb_native_invoke(struct tee_rpmb_mem *mem)
+/*
+ * Diagnostic for a write that never completed: after the controller has been
+ * reset, read one frame back. If the device did take the request, it answers
+ * with the matching response type and the result tells the key state
+ * (0x0007 = no key programmed). Read-only on the device.
+ */
+static void rpmb_native_probe_after_failure(struct tee_rpmb_mem *mem)
+{
+	struct rpmb_data_frame *f = mem->resp_data;
+	TEE_Result res = TEE_SUCCESS;
+
+	memset(f, 0, sizeof(*f));
+	res = imx_usdhc_rpmb_read(f, 1);
+	if (res) {
+		EMSG("RPMB: read after failed write also failed: %#"PRIx32, res);
+		return;
+	}
+	EMSG("RPMB: read after failed write ok, resp %02x%02x result %02x%02x"
+	     " counter %02x%02x%02x%02x",
+	     f->msg_type[0], f->msg_type[1], f->op_result[0], f->op_result[1],
+	     f->write_counter[0], f->write_counter[1], f->write_counter[2],
+	     f->write_counter[3]);
+}
+
+static TEE_Result rpmb_native_exchange(struct tee_rpmb_mem *mem)
 {
 	size_t req_blocks = mem->req_size / RPMB_DATA_FRAME_SIZE;
 	size_t resp_blocks = mem->resp_size / RPMB_DATA_FRAME_SIZE;
@@ -118,11 +142,38 @@ static TEE_Result rpmb_native_invoke(struct tee_rpmb_mem *mem)
 	default:
 		/* A request frame is a plain write, not a reliable one. */
 		res = imx_usdhc_rpmb_write(req, req_blocks, false);
-		if (res)
+		if (res) {
+			rpmb_native_probe_after_failure(mem);
 			return res;
+		}
 
 		return imx_usdhc_rpmb_read(mem->resp_data, resp_blocks);
 	}
+}
+
+static TEE_Result rpmb_native_invoke(struct tee_rpmb_mem *mem)
+{
+	static unsigned int exchanges;
+	struct rpmb_data_frame *req = mem->req_data;
+	struct rpmb_data_frame *resp = mem->resp_data;
+	TEE_Result res = rpmb_native_exchange(mem);
+
+	/* Hand the device back on the user partition either way. */
+	imx_usdhc_rpmb_done();
+
+	exchanges++;
+	if (res)
+		EMSG("RPMB exchange %u: req type %02x%02x failed: %#"PRIx32,
+		     exchanges, req->msg_type[0], req->msg_type[1], res);
+	else if (resp->op_result[0] || resp->op_result[1])
+		EMSG("RPMB exchange %u: req type %02x%02x -> resp %02x%02x result %02x%02x",
+		     exchanges, req->msg_type[0], req->msg_type[1],
+		     resp->msg_type[0], resp->msg_type[1],
+		     resp->op_result[0], resp->op_result[1]);
+	else if (!(exchanges % 50))
+		IMSG("RPMB: %u exchanges so far, all accepted", exchanges);
+
+	return res;
 }
 #endif /* CFG_IMX_RPMB_NATIVE */
 
@@ -219,9 +270,53 @@ CTX_NEW = """	bool legacy_operation;
 #endif
 """
 
+# Key programming lives in the legacy init path, which talks to the normal
+# world. Keep the native path in charge and program the key from there.
+WRITE_KEY_OLD = """next:
+	if (IS_ENABLED(CFG_RPMB_WRITE_KEY))
+		return legacy_rpmb_init();
+"""
+
+WRITE_KEY_NEW = """next:
+	if (IS_ENABLED(CFG_RPMB_WRITE_KEY) &&
+	    !IS_ENABLED(CFG_IMX_RPMB_NATIVE))
+		return legacy_rpmb_init();
+"""
+
+PROGRAM_OLD = """		res = tee_rpmb_init_read_wr_cnt(&rpmb_ctx->wr_cnt);
+		if (res)
+			continue;
+		break;
+	}
+"""
+
+PROGRAM_NEW = """		res = tee_rpmb_init_read_wr_cnt(&rpmb_ctx->wr_cnt);
+		if (res == TEE_ERROR_ITEM_NOT_FOUND &&
+		    IS_ENABLED(CFG_RPMB_WRITE_KEY)) {
+			/*
+			 * The device has no authentication key yet. Program
+			 * the derived key once; the counter read inside the
+			 * write is what confirms the device accepted it.
+			 */
+			IMSG("RPMB: programming the authentication key");
+			res = tee_rpmb_write_and_verify_key();
+			if (res)
+				EMSG("RPMB: key programming failed: %#"PRIx32,
+				     res);
+		} else if (res) {
+			EMSG("RPMB: write counter read failed: %#"PRIx32, res);
+		}
+		if (res)
+			continue;
+		break;
+	}
+"""
+
 EDITS = [
     (INCLUDE_OLD, INCLUDE_NEW),
     (CTX_OLD, CTX_NEW),
+    (WRITE_KEY_OLD, WRITE_KEY_NEW),
+    (PROGRAM_OLD, PROGRAM_NEW),
     (ALLOC_OLD, ALLOC_NEW),
     (INVOKE_OLD, INVOKE_NEW),
     (INVOKE_BODY_OLD, INVOKE_BODY_NEW),
