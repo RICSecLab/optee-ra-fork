@@ -49,4 +49,14 @@ TEE_Result imx_usdhc_rpmb_read(void *buf, size_t nblocks);
 TEE_Result imx_usdhc_rpmb_write(const void *buf, size_t nblocks,
 				bool reliable);
 
+/*
+ * Return the device to the user partition. Call this once a request and its
+ * response have both been exchanged: the two are one transaction, and
+ * switching partitions in between loses the response.
+ */
+TEE_Result imx_usdhc_rpmb_done(void);
+
+/* Boot-time controller micro-benchmark (read-only on the device) */
+void imx_usdhc_benchmark(void);
+
 #endif /* __DRIVERS_IMX_USDHC_H */
