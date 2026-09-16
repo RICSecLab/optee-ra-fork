@@ -14,13 +14,15 @@ how to exercise it from Linux with `tpm2-tools`.
 * On the Linux side the `tpm_ftpm_tee` driver exposes it as a standard
   `/dev/tpm0` character device.
 
-`meta-arm` gates the recipe to QEMU/`genericarm64` machines, so this layer
-adds two bbappends:
+`meta-arm` gates the recipe to QEMU/`genericarm64` machines. This layer
+adds the following bbappends and patches:
 
 | File | Purpose |
 |------|---------|
 | `recipes-security/optee-ftpm/optee-ftpm_%.bbappend` | Allow `imx8mpevk` (`COMPATIBLE_MACHINE`) and build the TA as AArch64 |
-| `recipes-kernel/linux/linux-imx_%.bbappend` + `linux-imx/ftpm.cfg` | Enable `CONFIG_TCG_FTPM_TEE=m` in the i.MX kernel (only when the `optee-ftpm` machine feature is set) |
+| `recipes-kernel/linux/linux-imx_%.bbappend` + `linux-imx/ftpm.cfg` | Build the `tpm_ftpm_tee` driver into the i.MX kernel (`CONFIG_TCG_FTPM_TEE=y`) together with IMA, and keep Linux off the on-board eMMC (only when the `optee-ftpm` machine feature is set) |
+| `recipes-security/optee/optee-os_%.imx.bbappend` | Build the OP-TEE core uSDHC driver and the native RPMB backend (`attester/optee-patches/`) into OP-TEE, and make RPMB the only private storage (`CFG_REE_FS=n`) |
+| `recipes-bsp/u-boot/`, `recipes-bsp/imx-atf/` | Keep U-Boot off the on-board eMMC; make uSDHC3 a secure bus master in BL31 |
 
 ## Enabling the fTPM
 
@@ -29,7 +31,7 @@ the file lives at `${YOCTO_DIR}/build/conf/local.conf` on the host):
 
 ```
 MACHINE_FEATURES:append = " optee-ftpm"
-IMAGE_INSTALL:append = " optee-ftpm tpm2-tools libtss2-tcti-device kernel-module-tpm-ftpm-tee"
+IMAGE_INSTALL:append = " optee-ftpm tpm2-tools libtss2-tcti-device"
 ```
 
 Then rebuild. The `bitbake` commands below run inside the `yocto.sh` build
@@ -48,28 +50,53 @@ bitbake -f -c image core-image-minimal
 For a HAB-signed board, sign the resulting image as usual with
 `secure-boot-imx8mp.sh` (see the secure-boot guide).
 
+## How the fTPM starts before Linux
+
+The fTPM keeps its persistent state in the RPMB partition of the on-board
+eMMC. In stock OP-TEE that traffic is relayed by `tee-supplicant`, so the TA
+could only start once user space was up, long after IMA had looked for a TPM
+and given up. With the `optee-ftpm` feature this layer instead:
+
+* builds an eMMC controller driver for uSDHC3 into the OP-TEE core
+  (`attester/optee-patches/imx_usdhc.c`) and routes `tee_rpmb_fs.c` to it
+  (`rpmb-native-backend.py`), so RPMB is reachable with no help from Linux;
+* makes RPMB the only private storage (`CFG_REE_FS=n`) and lets the TA
+  enumerate at OP-TEE driver probe instead of waiting for the supplicant;
+* gives the on-board eMMC to the TEE: uSDHC3 is disabled in the U-Boot and
+  Linux device trees, BL31 configures it as a secure bus master with
+  secure-only registers, and the shared `nand_usdhc_bus` clock is kept
+  running by the kernel.
+
+The result is that `/dev/tpm0` exists during kernel init and IMA anchors its
+measurement log in the fTPM (PCR 10). Nothing needs to be loaded after boot.
+
+**First boot on a device.** With `CFG_RPMB_WRITE_KEY=y`, OP-TEE programs the
+RPMB authentication key the first time it finds none. This happens once per
+eMMC and cannot be undone (the key is derived from the CAAM master key and
+the eMMC CID, so it never has to be stored). The fTPM then creates its NV
+storage, which takes a few seconds more than a normal boot.
+
 ## Using the fTPM on the device
 
-The driver is built as a module on purpose: the fTPM stores its persistent
-state through `tee-supplicant` (REE filesystem — RPMB is not provisioned on
-the EVK), so the TA can only initialize once the supplicant is running.
-After boot:
-
 ```sh
-modprobe tpm_ftpm_tee
+dmesg | grep -iE "tpm|ima:"      # no "No TPM chip found"; no tpm0 errors
 ls /dev/tpm0
 tpm2_getcap properties-fixed   # manufacturer/firmware info
-tpm2_pcrread                   # PCR banks
+tpm2_pcrread sha256:10         # non-zero once IMA has measured
 ```
 
 ## Caveats
 
-* **State storage**: fTPM persistent state lives on the REE filesystem via
-  `tee-supplicant`. It is encrypted by OP-TEE, but without RPMB there is no
-  rollback protection for the TPM state.
-* **Not a measured-boot root**: nothing measures into the fTPM PCRs during
-  boot on this platform; PCRs start at their reset values. Using the fTPM
-  with IMA or as a boot-measurement root requires additional integration.
+* **The eMMC belongs to the TEE.** This arrangement assumes U-Boot and Linux
+  never use the on-board eMMC, which holds on the EVK because it boots from
+  SD. A product that boots from its only eMMC, or uses it as Linux storage,
+  needs a different design (a separate TEE storage device, or a volatile
+  fTPM seeded from CAAM).
+* **RPMB key programming is irreversible.** See "First boot on a device".
+* **Boot firmware is not measured.** IMA measures from kernel start; U-Boot
+  and the kernel are not extended into the PCRs (HAB secure boot and the RA
+  PRoT measurement cover them). IMA measures only `boot_aggregate` until a
+  policy is loaded (`CONFIG_IMA_WRITE_POLICY=y` allows that at runtime).
 * With the feature enabled, the `meta-arm` bbappend pins `CFG_CORE_HEAP_SIZE`
   to 128 KiB — the fTPM needs more TEE core heap than OP-TEE's generic
   64 KiB default. On i.MX this is a no-op: the NXP tree already defaults all
