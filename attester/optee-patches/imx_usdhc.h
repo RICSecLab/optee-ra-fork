@@ -42,9 +42,10 @@ TEE_Result imx_usdhc_dev_info(uint8_t *cid, uint8_t *rpmb_size_mult,
 TEE_Result imx_usdhc_rpmb_read(void *buf, size_t nblocks);
 
 /*
- * @reliable marks the transfer as a reliable write, which the eMMC requires
- * for authenticated data writes and for programming the key. Request frames
- * that merely ask the device for something must not set it.
+ * @reliable marks the transfer as a reliable write, which the RPMB
+ * specification requires for authenticated data writes and for programming
+ * the key. The current driver issues every RPMB write as a reliable write
+ * (see rpmb_xfer()); the flag records the caller's intent.
  */
 TEE_Result imx_usdhc_rpmb_write(const void *buf, size_t nblocks,
 				bool reliable);

@@ -154,11 +154,11 @@ static TEE_Result rpmb_native_exchange(struct tee_rpmb_mem *mem)
 static TEE_Result rpmb_native_invoke(struct tee_rpmb_mem *mem)
 {
 	static unsigned int exchanges;
-	struct rpmb_data_frame *req = mem->req_data;
+	struct rpmb_data_frame *req __maybe_unused = mem->req_data;
 	struct rpmb_data_frame *resp = mem->resp_data;
 	TEE_Result res = rpmb_native_exchange(mem);
 
-	/* Hand the device back on the user partition either way. */
+	/* End of the request/response transaction. */
 	imx_usdhc_rpmb_done();
 
 	exchanges++;
