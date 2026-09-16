@@ -270,11 +270,6 @@ static TEE_Result usdhc_pads_configure(void)
 }
 
 /*
- * Ungate the controller clock and point its root at the 24 MHz oscillator.
- * Linux is not running yet at this point, but the boot loader may have left
- * the clock gated: touching the registers in that state faults the core.
- */
-/*
  * The controller's bus side (data buffer and DMA) runs on the shared
  * NAND/uSDHC bus root. Nothing in Linux uses that root once uSDHC3 is
  * disabled in its device tree, so its clock framework switches the root
@@ -287,7 +282,7 @@ static TEE_Result usdhc_pads_configure(void)
 /* CCGRn plain (read) register; the SET alias comes from the platform headers */
 #define CCM_CCGRn(n)		(0x4000 + (n) * 0x10)
 
-static void usdhc_bus_clock_ensure(vaddr_t ccm, const char *when)
+static void usdhc_bus_clock_ensure(vaddr_t ccm, const char *when __maybe_unused)
 {
 	uint32_t v = io_read32(ccm + CCM_NAND_USDHC_BUS_ROOT);
 	uint32_t r = io_read32(ccm + CFG_IMX_USDHC_CCM_TARGET);
@@ -315,6 +310,11 @@ static void usdhc_bus_clock_ensure(vaddr_t ccm, const char *when)
 		udelay(10);
 }
 
+/*
+ * Ungate the controller clock and point its root at the 24 MHz oscillator.
+ * Linux is not running yet at this point, but the boot loader may have left
+ * the clock gated: touching the registers in that state faults the core.
+ */
 static TEE_Result usdhc_clock_enable(void)
 {
 	vaddr_t ccm = core_mmu_get_va(CCM_BASE, MEM_AREA_IO_SEC, CCM_SIZE);
@@ -354,7 +354,8 @@ static TEE_Result wait_bits_clear(vaddr_t reg, uint32_t mask, uint32_t timeout)
 
 static uint64_t measure_sdclk_khz(vaddr_t base);
 
-static void dump_regs(vaddr_t base, const char *tag)
+/* Everything here is trace output: with tracing compiled out it is empty. */
+static void dump_regs(vaddr_t base __maybe_unused, const char *tag __maybe_unused)
 {
 	IMSG("uSDHC %s: PRSSTAT %#"PRIx32" IRQSTAT %#"PRIx32" MIXCTRL %#"PRIx32
 	     " BLKATTR %#"PRIx32" WML %#"PRIx32, tag,
@@ -847,6 +848,7 @@ static TEE_Result card_identify(void)
 {
 	struct mmc_cmd cmd = { };
 	uint64_t tref = 0;
+	uint64_t khz __maybe_unused = 0;
 	size_t i = 0;
 	TEE_Result res = TEE_SUCCESS;
 
@@ -931,7 +933,8 @@ static TEE_Result card_identify(void)
 	 * 26 MHz legacy-timing limit of the device.
 	 */
 	set_clock(usdhc_base(), 0, 0);
-	IMSG("uSDHC SD clock measured: %"PRIu64" kHz", measure_sdclk_khz(usdhc_base()));
+	khz = measure_sdclk_khz(usdhc_base());
+	IMSG("uSDHC SD clock measured: %"PRIu64" kHz", khz);
 
 	cmd = (struct mmc_cmd){ .idx = MMC_CMD_SELECT_CARD,
 				.arg = SHIFT_U32(usdhc_ctx.rca, 16),
@@ -1019,7 +1022,7 @@ static TEE_Result wait_card_ready(void)
 
 
 static TEE_Result rpmb_xfer(void *buf, size_t nblocks, bool write,
-			    bool reliable)
+			    bool reliable __maybe_unused)
 {
 	struct mmc_cmd cmd = { };
 	TEE_Result res = TEE_SUCCESS;
@@ -1041,15 +1044,13 @@ static TEE_Result rpmb_xfer(void *buf, size_t nblocks, bool write,
 	xfer_stats.t_ready += us_since(t0); t0 = read_cntpct();
 
 	/*
-	 * Bit 31 of SET_BLOCK_COUNT marks a reliable write. It belongs on
-	 * authenticated data writes and on key programming only: request
-	 * frames that ask the device for something are plain writes, and
-	 * marking those reliable makes the device ignore the transfer.
-	 */
-	/*
-	 * Mark every RPMB write reliable. The spec reserves the flag for
-	 * authenticated writes, but this device leaves a plain write sitting
-	 * in the controller and never takes the data.
+	 * Bit 31 of SET_BLOCK_COUNT marks a reliable write. The RPMB
+	 * specification asks for it on authenticated data writes and key
+	 * programming; request frames are plain writes. This driver sets it
+	 * on every write regardless of @reliable: that is the form validated
+	 * on the board (the device accepts it for request frames too), and
+	 * the plain-write form has not been re-tested since the clock and
+	 * DMA fixes. Keep @reliable in the interface for when it is.
 	 */
 	cmd = (struct mmc_cmd){ .idx = MMC_CMD_SET_BLOCK_COUNT,
 				.arg = nblocks | (write ? BIT32(31) : 0),
@@ -1314,7 +1315,8 @@ void imx_usdhc_benchmark(void)
 {
 	vaddr_t base = usdhc_base();
 	vaddr_t ccm = core_mmu_get_va(CCM_BASE, MEM_AREA_IO_SEC, CCM_SIZE);
-	uint64_t a = 0, b = 0;
+	uint64_t a __maybe_unused = 0;
+	uint64_t b __maybe_unused = 0;
 	uint32_t root = 0;
 
 	if (imx_usdhc_init() || switch_partition(EXT_CSD_PART_ACCESS_USER))

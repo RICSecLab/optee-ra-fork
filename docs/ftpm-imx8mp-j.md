@@ -15,8 +15,8 @@ Application として動かす Yocto イメージのビルド方法と、Linux �
 * Linux 側では `tpm_ftpm_tee` ドライバが標準の `/dev/tpm0` キャラクタ
   デバイスとして公開します。
 
-`meta-arm` はこのレシピを QEMU / `genericarm64` マシンに限定しているため、
-本レイヤでは 2 つの bbappend を追加しています:
+`meta-arm` はこのレシピを QEMU / `genericarm64` マシンに限定しています。
+本レイヤでは次の bbappend とパッチを追加しています:
 
 | ファイル | 目的 |
 |----------|------|

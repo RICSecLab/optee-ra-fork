@@ -14,8 +14,8 @@ how to exercise it from Linux with `tpm2-tools`.
 * On the Linux side the `tpm_ftpm_tee` driver exposes it as a standard
   `/dev/tpm0` character device.
 
-`meta-arm` gates the recipe to QEMU/`genericarm64` machines, so this layer
-adds two bbappends:
+`meta-arm` gates the recipe to QEMU/`genericarm64` machines. This layer
+adds the following bbappends and patches:
 
 | File | Purpose |
 |------|---------|
