@@ -326,7 +326,7 @@ static TEE_Result usdhc_clock_enable(void)
 
 	/* Root clock: enable, source 0 (24 MHz osc), no pre/post divider */
 	io_write32(ccm + CFG_IMX_USDHC_CCM_TARGET, BIT32(28));
-	IMSG("uSDHC CCM root: wrote %#"PRIx32", reads %#"PRIx32, BIT32(28),
+	DMSG("uSDHC CCM root: wrote %#"PRIx32", reads %#"PRIx32, BIT32(28),
 	     io_read32(ccm + CFG_IMX_USDHC_CCM_TARGET));
 
 	/* Ungate the peripheral in all power domains */
@@ -785,7 +785,7 @@ static void set_clock(vaddr_t base, uint32_t divisor, uint32_t prescaler)
 
 	usdhc_ctx.clock_bits = want;
 	sysctl = io_read32(base + USDHC_SYSCTL);
-	IMSG("uSDHC clock: divider wanted %#"PRIx32", SYSCTL now %#"PRIx32
+	DMSG("uSDHC clock: divider wanted %#"PRIx32", SYSCTL now %#"PRIx32
 	     "%s", want, sysctl,
 	     ((sysctl & SYSCTL_CLOCK_MASK) == want) ? "" : " (MISMATCH)");
 }
@@ -858,7 +858,7 @@ static TEE_Result card_identify(void)
 		     io_read32(usdhc_base() + USDHC_PRSSTAT));
 		return res;
 	}
-	IMSG("uSDHC: CMD0 ok");
+	DMSG("uSDHC: CMD0 ok");
 
 	mdelay(2);
 
@@ -881,7 +881,7 @@ static TEE_Result card_identify(void)
 			return TEE_ERROR_COMMUNICATION;
 		}
 		if (cmd.resp[0] & MMC_OCR_BUSY) {
-			IMSG("uSDHC: OCR %#"PRIx32, cmd.resp[0]);
+			DMSG("uSDHC: OCR %#"PRIx32, cmd.resp[0]);
 			break;
 		}
 
@@ -1085,7 +1085,7 @@ static TEE_Result rpmb_xfer(void *buf, size_t nblocks, bool write,
 		xfer_stats.n_rd++;
 	}
 	if (++xfer_stats.n == 50) {
-		IMSG("uSDHC avg us over 50: init %"PRIu64" switch %"PRIu64
+		DMSG("uSDHC avg us over 50: init %"PRIu64" switch %"PRIu64
 		     " ready %"PRIu64" cmd23 %"PRIu64" (inhibit %"PRIu64
 		     " cc %"PRIu64") | data read %"PRIu64" x%u, write %"PRIu64" x%u",
 		     xfer_stats.t_init / 50, xfer_stats.t_switch / 50,
