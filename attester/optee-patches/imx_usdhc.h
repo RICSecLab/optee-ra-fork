@@ -50,9 +50,9 @@ TEE_Result imx_usdhc_rpmb_write(const void *buf, size_t nblocks,
 				bool reliable);
 
 /*
- * Return the device to the user partition. Call this once a request and its
- * response have both been exchanged: the two are one transaction, and
- * switching partitions in between loses the response.
+ * Called once a request and its response have both been exchanged. The
+ * device is left on the RPMB partition (nothing else uses the eMMC), so
+ * this is currently a no-op kept for the transaction boundary.
  */
 TEE_Result imx_usdhc_rpmb_done(void);
 

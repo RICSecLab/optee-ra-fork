@@ -171,7 +171,7 @@ static TEE_Result rpmb_native_invoke(struct tee_rpmb_mem *mem)
 		     resp->msg_type[0], resp->msg_type[1],
 		     resp->op_result[0], resp->op_result[1]);
 	else if (!(exchanges % 50))
-		IMSG("RPMB: %u exchanges so far, all accepted", exchanges);
+		DMSG("RPMB: %u exchanges so far, all accepted", exchanges);
 
 	return res;
 }
