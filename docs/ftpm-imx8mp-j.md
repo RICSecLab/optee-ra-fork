@@ -85,7 +85,17 @@ dmesg | grep -iE "tpm|ima:"      # "No TPM chip found" が出ないこと、tpm0
 ls /dev/tpm0
 tpm2_getcap properties-fixed   # メーカー / ファームウェア情報
 tpm2_pcrread sha256:10         # IMA が計測すれば非ゼロ
+head /sys/kernel/security/ima/ascii_runtime_measurements
 ```
+
+フィーチャ有効時、U-Boot はカーネルに `ima_policy=tcb ima_template=ima-ng
+ima_hash=sha256` を渡します(`recipes-bsp/u-boot/` の U-Boot 環境パッチ)。
+これにより IMA は、すべての実行ファイル、マップされるライブラリ、カーネル
+モジュール、root が開くファイルを計測リストと PCR 10 に記録します。リストと
+PCR はどちらも揮発で、起動のたびにゼロから始まります。リストの各エントリの
+テンプレートハッシュをゼロの PCR に順に extend し直すと、fTPM から読んだ
+値が再現できます。リストは見ている間にも伸びるので、PCR とリストは続けて
+読んでください。
 
 ## 注意事項
 
@@ -97,9 +107,10 @@ tpm2_pcrread sha256:10         # IMA が計測すれば非ゼロ
 * **RPMB 鍵の書き込みは取り消せない**: 「デバイスでの初回起動」を参照。
 * **ブートファームウェアは計測されない**: IMA はカーネル起動後から計測
   します。U-Boot とカーネルは PCR に extend されません(HAB のセキュア
-  ブートと RA の PRoT 計測が担います)。ポリシーを読み込むまで IMA は
-  `boot_aggregate` しか計測しません(`CONFIG_IMA_WRITE_POLICY=y` により
-  実行時に読み込めます)。
+  ブートと RA の PRoT 計測が担います)。そのため `boot_aggregate` は
+  すべてゼロの PCR から計算されます。計測範囲が決まったら
+  `CONFIG_IMA_WRITE_POLICY=y` により `tcb` ポリシーを実行時に差し替え
+  られます。
 * フィーチャ有効時、`meta-arm` の bbappend が `CFG_CORE_HEAP_SIZE` を
   128 KiB に固定します(fTPM は OP-TEE 汎用デフォルトの 64 KiB より多くの
   TEE コアヒープを必要とするため)。i.MX では NXP ツリーが元々全 i.MX

@@ -83,7 +83,17 @@ dmesg | grep -iE "tpm|ima:"      # no "No TPM chip found"; no tpm0 errors
 ls /dev/tpm0
 tpm2_getcap properties-fixed   # manufacturer/firmware info
 tpm2_pcrread sha256:10         # non-zero once IMA has measured
+head /sys/kernel/security/ima/ascii_runtime_measurements
 ```
+
+With the feature, U-Boot passes `ima_policy=tcb ima_template=ima-ng
+ima_hash=sha256` to the kernel, so IMA measures every executable, mapped
+library, kernel module and root-opened file into the measurement list and
+PCR 10 (a U-Boot environment patch in `recipes-bsp/u-boot/`). The list and
+the PCR are volatile: both restart from zero at every boot. Replaying the
+list's template hashes into a zeroed PCR reproduces the value read from the
+fTPM; the list grows while you look at it, so read the PCR and the list
+close together.
 
 ## Caveats
 
@@ -95,8 +105,9 @@ tpm2_pcrread sha256:10         # non-zero once IMA has measured
 * **RPMB key programming is irreversible.** See "First boot on a device".
 * **Boot firmware is not measured.** IMA measures from kernel start; U-Boot
   and the kernel are not extended into the PCRs (HAB secure boot and the RA
-  PRoT measurement cover them). IMA measures only `boot_aggregate` until a
-  policy is loaded (`CONFIG_IMA_WRITE_POLICY=y` allows that at runtime).
+  PRoT measurement cover them), so `boot_aggregate` is computed over
+  all-zero PCRs. `CONFIG_IMA_WRITE_POLICY=y` allows replacing the `tcb`
+  policy at runtime once the measurement scope is decided.
 * With the feature enabled, the `meta-arm` bbappend pins `CFG_CORE_HEAP_SIZE`
   to 128 KiB — the fTPM needs more TEE core heap than OP-TEE's generic
   64 KiB default. On i.MX this is a no-op: the NXP tree already defaults all
