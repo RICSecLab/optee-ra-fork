@@ -20,7 +20,7 @@ adds the following bbappends and patches:
 | File | Purpose |
 |------|---------|
 | `recipes-security/optee-ftpm/optee-ftpm_%.bbappend` | Allow `imx8mpevk` (`COMPATIBLE_MACHINE`) and build the TA as AArch64 |
-| `recipes-kernel/linux/linux-imx_%.bbappend` + `linux-imx/ftpm.cfg` | Build the `tpm_ftpm_tee` driver into the i.MX kernel (`CONFIG_TCG_FTPM_TEE=y`) and keep Linux off the on-board eMMC (only when the `optee-ftpm` machine feature is set) |
+| `recipes-kernel/linux/linux-imx_%.bbappend` + `linux-imx/ftpm.cfg` | Build the `tpm_ftpm_tee` driver into the i.MX kernel (`CONFIG_TCG_FTPM_TEE=y`) together with IMA, and keep Linux off the on-board eMMC (only when the `optee-ftpm` machine feature is set) |
 | `recipes-security/optee/optee-os_%.imx.bbappend` | Build the OP-TEE core uSDHC driver and the native RPMB backend (`attester/optee-patches/`) into OP-TEE, and make RPMB the only private storage (`CFG_REE_FS=n`) |
 | `recipes-bsp/u-boot/`, `recipes-bsp/imx-atf/` | Keep U-Boot off the on-board eMMC; make uSDHC3 a secure bus master in BL31 |
 
@@ -83,7 +83,17 @@ dmesg | grep -iE "tpm|ima:"      # no "No TPM chip found"; no tpm0 errors
 ls /dev/tpm0
 tpm2_getcap properties-fixed   # manufacturer/firmware info
 tpm2_pcrread sha256:10         # non-zero once IMA has measured
+head /sys/kernel/security/ima/ascii_runtime_measurements
 ```
+
+With the feature, U-Boot passes `ima_policy=tcb ima_template=ima-ng
+ima_hash=sha256` to the kernel, so IMA measures every executable, mapped
+library, kernel module and root-opened file into the measurement list and
+PCR 10 (a U-Boot environment patch in `recipes-bsp/u-boot/`). The list and
+the PCR are volatile: both restart from zero at every boot. Replaying the
+list's template hashes into a zeroed PCR reproduces the value read from the
+fTPM; the list grows while you look at it, so read the PCR and the list
+close together.
 
 ## Caveats
 
@@ -95,7 +105,9 @@ tpm2_pcrread sha256:10         # non-zero once IMA has measured
 * **RPMB key programming is irreversible.** See "First boot on a device".
 * **Boot firmware is not measured.** IMA measures from kernel start; U-Boot
   and the kernel are not extended into the PCRs (HAB secure boot and the RA
-  PRoT measurement cover them).
+  PRoT measurement cover them), so `boot_aggregate` is computed over
+  all-zero PCRs. `CONFIG_IMA_WRITE_POLICY=y` allows replacing the `tcb`
+  policy at runtime once the measurement scope is decided.
 * With the feature enabled, the `meta-arm` bbappend pins `CFG_CORE_HEAP_SIZE`
   to 128 KiB — the fTPM needs more TEE core heap than OP-TEE's generic
   64 KiB default. On i.MX this is a no-op: the NXP tree already defaults all
