@@ -113,3 +113,30 @@ veraison clear-stores
 `.rodata` に埋め込むため)なので、リリースビルドごとに再計算・再登録して
 ください。ARoT の値は TA バイナリが変わったときだけ変わります。
 `pyelftools` が必要です(`pip install pyelftools`)。
+
+## i.MX での signer-id と trust anchor
+
+i.MX ビルドでは PTA が signer-id と lifecycle をプラットフォームから埋めるため
+(トップの README の 8.4 節参照)、`data/comid-psa-refval-imx.json` には次の値を
+入れます。
+
+- `ARoT` の signer-id: TA 署名鍵の SHA-256(ビッグエンディアンの modulus に
+  ビッグエンディアン 32 ビットの exponent を続けたもの)。NXP デフォルトの
+  `keys/default_ta.pem` では `ty+NnL9yl7UUSDqhuDTDxU3PCkoIzSVVkHx4g07/xlk=` です。
+  別の鍵(exponent が通常の 65537)の場合:
+
+  ```sh
+  openssl rsa -in keys/default_ta.pem -noout -modulus | cut -d= -f2 | \
+      tr -d '\n' | sed 's/$/00010001/' | xxd -r -p | sha256sum | \
+      cut -d' ' -f1 | xxd -r -p | base64
+  ```
+
+- `PRoT` の signer-id: boot signer、すなわち fuse に書き込んだ SRK ハッシュ
+  (CST の `SRK_1_2_3_4_fuses.bin` の 32 バイトを base64 にしたもの)。研究室の
+  SRK では `IPNu4+wT0O2kan7wdvMTGWduHBpp0BeE/uSSn/6Bc2A=` です。
+
+trust anchor(`data/comid-psa-ta-imx.json`)はデバイスごとです。PTA がデバイス上で
+保持する鍵を `optee_remote_attestation --get-pubkey` で読み出し、トップの README の
+8 節の手順で変換して入れます。`imx-caam` と `imx-cpu` のファイルは性能計測
+(`docs/performance-measurement-j.md`)のビルド用で、以前のフォーク PTA で
+計測したものです。

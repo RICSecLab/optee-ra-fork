@@ -115,3 +115,30 @@ measurements emitted by the PTA. Note the PRoT value is build-specific
 (OP-TEE embeds the build timestamp in the hashed `.rodata`), so recompute and
 re-provision it for every released build; the ARoT value only changes when
 the TA binary changes. Requires `pyelftools` (`pip install pyelftools`).
+
+## Signer IDs and the Trust Anchor on i.MX
+
+On the i.MX build the PTA fills the signer-ids and the lifecycle from the
+platform (see section 8.4 of the top-level README), so
+`data/comid-psa-refval-imx.json` carries:
+
+- `ARoT` signer-id: the SHA-256 of the TA signing key, over the big-endian
+  modulus followed by the big-endian 32-bit exponent. For NXP's default
+  `keys/default_ta.pem` it is `ty+NnL9yl7UUSDqhuDTDxU3PCkoIzSVVkHx4g07/xlk=`;
+  for another key with the usual exponent 65537:
+
+  ```sh
+  openssl rsa -in keys/default_ta.pem -noout -modulus | cut -d= -f2 | \
+      tr -d '\n' | sed 's/$/00010001/' | xxd -r -p | sha256sum | \
+      cut -d' ' -f1 | xxd -r -p | base64
+  ```
+
+- `PRoT` signer-id: the boot signer, the SRK hash as programmed in the fuses
+  (the 32 bytes of `SRK_1_2_3_4_fuses.bin` from the CST, base64 encoded):
+  `IPNu4+wT0O2kan7wdvMTGWduHBpp0BeE/uSSn/6Bc2A=` for the lab's SRK.
+
+The trust anchor (`data/comid-psa-ta-imx.json`) is per device: the key the
+PTA keeps on the device, read with `optee_remote_attestation --get-pubkey`
+and converted as in section 8 of the top-level README. The `imx-caam` and
+`imx-cpu` files belong to the builds of the performance measurement
+(`docs/performance-measurement.md`), made with the earlier fork of the PTA.

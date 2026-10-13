@@ -34,12 +34,12 @@
               "type": "psa.refval-id",
               "value": {
                 "label": "ARoT",
-                "signer-id": "427zIO3QE+zwfmqkGRPzdhocbmeEF9Bpn5Lk/mBzgf4="
+                "signer-id": "ty+NnL9yl7UUSDqhuDTDxU3PCkoIzSVVkHx4g07/xlk="
               }
             },
             "value": {
               "digests": [
-                "sha-256;FjIXXyuEaEG2FsLTRZjCck573aBBlnJT0sed9M9nRwA="
+                "sha-256;o6PuA5B8B/SzLO1BouG/FkvVuQeT1x/rXp+Hsq67wz0="
               ]
             }
           },
@@ -48,12 +48,12 @@
               "type": "psa.refval-id",
               "value": {
                 "label": "PRoT",
-                "signer-id": "427zIO3QE+zwfmqkGRPzdhocbmeEF9Bpn5Lk/mBzgf4="
+                "signer-id": "IPNu4+wT0O2kan7wdvMTGWduHBpp0BeE/uSSn/6Bc2A="
               }
             },
             "value": {
               "digests": [
-                "sha-256;UsHZbTgZfIUT3ga7FuAaKn/PnGO2WgpvZp1eM2b82oY="
+                "sha-256;WewDQ0YhE3fBsIeuIe3BtvwVLITAHsK3lODGmM00p2k="
               ]
             }
           }
