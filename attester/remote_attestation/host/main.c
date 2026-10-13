@@ -6,6 +6,8 @@
 #include <string.h>
 #include <time.h>
 
+#include <openssl/sha.h>
+
 /* OP-TEE TEE client API (built by optee_client) */
 #include <tee_client_api.h>
 
@@ -17,7 +19,7 @@
 
 /* Performance measurement logging (see perf.h) */
 int ra_perf_enabled = 0;
-const char *ra_perf_keymode = "-";
+const char *ra_perf_keymode = "pta";
 
 uint64_t ra_perf_now_us(void) {
     struct timespec ts;
@@ -81,22 +83,56 @@ static int parse_hex(const char *hex, uint8_t **out, size_t *out_len) {
     return 0;
 }
 
+/* Parse a 32-byte hex value for an option, exit on error */
+static uint8_t *parse_hex32(const char *opt, const char *hex) {
+    uint8_t *buf = NULL;
+    size_t len = 0;
+
+    if (parse_hex(hex, &buf, &len) != 0)
+        errx(1, "Invalid %s value", opt);
+    if (len != PUBKEY_COORD_SIZE)
+        errx(1, "%s must be exactly %d bytes", opt, PUBKEY_COORD_SIZE);
+    return buf;
+}
+
+/*
+ * Print a public key and the PSA instance-id the PTA derives from it:
+ * 0x01 followed by the SHA-256 of the SEC 1 uncompressed point.
+ */
+static void print_public_key(const uint8_t *pub_x, const uint8_t *pub_y) {
+    uint8_t point[1 + 2 * PUBKEY_COORD_SIZE] = {0x04};
+    uint8_t instance_id[1 + SHA256_DIGEST_LENGTH] = {0x01};
+
+    memcpy(point + 1, pub_x, PUBKEY_COORD_SIZE);
+    memcpy(point + 1 + PUBKEY_COORD_SIZE, pub_y, PUBKEY_COORD_SIZE);
+    SHA256(point, sizeof(point), instance_id + 1);
+
+    printf("PubX(hex): ");
+    print_binary_in_hex((uint8_t *)pub_x, PUBKEY_COORD_SIZE);
+    printf("PubY(hex): ");
+    print_binary_in_hex((uint8_t *)pub_y, PUBKEY_COORD_SIZE);
+    printf("InstanceID(hex): ");
+    print_binary_in_hex(instance_id, sizeof(instance_id));
+}
+
 static void print_usage(const char *prog) {
     printf("Usage: %s [options]\n\n", prog);
     printf("Options:\n");
     printf("  --help, -h                Show this help and exit\n");
-    printf("  --generate-blackkey       Generate new black key (CAAM only)\n");
-    printf("  --convert-key HEX         Convert plain key to black key (CAAM only)\n");
-    printf("  --key-hex HEX             Use key blob in hex for signing\n");
+    printf("  --import-key HEX          Install a P-256 private key (32 bytes hex) in the PTA;\n");
+    printf("                            needs --pubx-hex and --puby-hex. Only possible\n");
+    printf("                            before the PTA has a key\n");
+    printf("  --get-pubkey              Print the public key of the PTA's signing key,\n");
+    printf("                            generating the key if there is none yet\n");
     printf("  --pubx-hex HEX            Public key X coordinate (32 bytes hex)\n");
     printf("  --puby-hex HEX            Public key Y coordinate (32 bytes hex)\n");
     printf("  --perf                    Print RA_PERF timing logs (or RA_PERF=1)\n");
     printf("  --loop N                  Repeat the attestation N times\n");
     printf("  --no-server               Skip the verifier; use a local random nonce\n");
     printf("\n");
-    printf("When using --key-hex with a CAAM black key, also supply --pubx-hex\n");
-    printf("and --puby-hex so the PTA can compute the correct PSA instance-id.\n");
-    printf("Alternatively, pass the FullKey (PubX||PubY||blob) directly to --key-hex.\n");
+    printf("The signing key never leaves the PTA and is never replaced: the\n");
+    printf("evidence is always signed with the key the PTA holds (or its\n");
+    printf("built-in test key).\n");
     printf("\n");
 }
 
@@ -107,18 +143,11 @@ int main(int argc, char *argv[]) {
     TEEC_UUID ta_uuid = TA_REMOTE_ATTESTATION_UUID;
     uint32_t err_origin;
 
-    /* Parse arguments: error on unknown or invalid usage */
-    bool has_key = false;
-    bool has_pubx = false;
-    bool has_puby = false;
-    uint8_t *host_key = NULL;
-    size_t host_key_len = 0;
     uint8_t *host_pub_x = NULL;
-    size_t host_pub_x_len = 0;
     uint8_t *host_pub_y = NULL;
-    size_t host_pub_y_len = 0;
-    bool mode_generate = false;
-    bool mode_convert = false;
+    uint8_t *host_priv = NULL;
+    bool mode_import = false;
+    bool mode_get_pubkey = false;
     bool no_server = false;
     long loop_count = 1;
 
@@ -129,77 +158,64 @@ int main(int argc, char *argv[]) {
             ra_perf_enabled = 1;
     }
 
-    if (argc > 1 && strcmp(argv[1], "--generate-blackkey") == 0) {
-        if (argc == 3 && strcmp(argv[2], "--perf") == 0)
-            ra_perf_enabled = 1;
-        else if (argc != 2)
-            errx(1, "--generate-blackkey takes no arguments (except --perf)");
-        mode_generate = true;
-    } else if (argc > 1 && strcmp(argv[1], "--convert-key") == 0) {
-        if (argc == 4 && strcmp(argv[3], "--perf") == 0)
-            ra_perf_enabled = 1;
-        else if (argc != 3)
-            errx(1, "--convert-key requires a hex key argument");
-        mode_convert = true;
-    }
-
-    if (!mode_generate && !mode_convert) {
-        for (int i = 1; i < argc; i++) {
-            if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-                print_usage(argv[0]);
-                return 0;
-            } else if (strcmp(argv[i], "--key-hex") == 0) {
-            if (has_key)
-                errx(1, "--key-hex specified multiple times");
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            print_usage(argv[0]);
+            return 0;
+        } else if (strcmp(argv[i], "--generate-key") == 0 ||
+                   strcmp(argv[i], "--generate-blackkey") == 0) {
+            errx(1, "%s is no longer supported: the PTA generates its key "
+                 "on first use, see --get-pubkey", argv[i]);
+        } else if (strcmp(argv[i], "--import-key") == 0 ||
+                   strcmp(argv[i], "--convert-key") == 0) {
+            if (host_priv)
+                errx(1, "--import-key specified multiple times");
             if (i + 1 >= argc)
-                errx(1, "Missing value for --key-hex");
-            if (parse_hex(argv[i + 1], &host_key, &host_key_len) != 0)
-                errx(1, "Invalid --key-hex value");
-            has_key = true;
+                errx(1, "Missing value for --import-key");
+            host_priv = parse_hex32("--import-key", argv[i + 1]);
+            mode_import = true;
             i++;
+        } else if (strcmp(argv[i], "--get-pubkey") == 0) {
+            mode_get_pubkey = true;
         } else if (strcmp(argv[i], "--pubx-hex") == 0) {
-            if (has_pubx)
+            if (host_pub_x)
                 errx(1, "--pubx-hex specified multiple times");
             if (i + 1 >= argc)
                 errx(1, "Missing value for --pubx-hex");
-            if (parse_hex(argv[i + 1], &host_pub_x, &host_pub_x_len) != 0)
-                errx(1, "Invalid --pubx-hex value");
-            if (host_pub_x_len != 32)
-                errx(1, "--pubx-hex must be exactly 32 bytes");
-            has_pubx = true;
+            host_pub_x = parse_hex32("--pubx-hex", argv[i + 1]);
             i++;
         } else if (strcmp(argv[i], "--puby-hex") == 0) {
-            if (has_puby)
+            if (host_pub_y)
                 errx(1, "--puby-hex specified multiple times");
             if (i + 1 >= argc)
                 errx(1, "Missing value for --puby-hex");
-            if (parse_hex(argv[i + 1], &host_pub_y, &host_pub_y_len) != 0)
-                errx(1, "Invalid --puby-hex value");
-            if (host_pub_y_len != 32)
-                errx(1, "--puby-hex must be exactly 32 bytes");
-            has_puby = true;
+            host_pub_y = parse_hex32("--puby-hex", argv[i + 1]);
             i++;
-            } else if (strcmp(argv[i], "--perf") == 0) {
-                ra_perf_enabled = 1;
-            } else if (strcmp(argv[i], "--loop") == 0) {
-                if (i + 1 >= argc)
-                    errx(1, "Missing value for --loop");
-                loop_count = strtol(argv[i + 1], NULL, 10);
-                if (loop_count < 1)
-                    errx(1, "Invalid --loop value");
-                i++;
-            } else if (strcmp(argv[i], "--no-server") == 0) {
-                no_server = true;
-            } else {
-                errx(1, "Unknown argument: %s", argv[i]);
-            }
+        } else if (strcmp(argv[i], "--key-hex") == 0) {
+            errx(1, "--key-hex is no longer supported: the signing key is "
+                 "held by the PTA, see --get-pubkey and --import-key");
+        } else if (strcmp(argv[i], "--perf") == 0) {
+            ra_perf_enabled = 1;
+        } else if (strcmp(argv[i], "--loop") == 0) {
+            if (i + 1 >= argc)
+                errx(1, "Missing value for --loop");
+            loop_count = strtol(argv[i + 1], NULL, 10);
+            if (loop_count < 1)
+                errx(1, "Invalid --loop value");
+            i++;
+        } else if (strcmp(argv[i], "--no-server") == 0) {
+            no_server = true;
+        } else {
+            errx(1, "Unknown argument: %s", argv[i]);
         }
-
-        if ((has_pubx || has_puby) && !has_key)
-            errx(1, "--pubx-hex/--puby-hex require --key-hex");
-        if (has_pubx != has_puby)
-            errx(1, "--pubx-hex and --puby-hex must be specified together");
     }
+
+    if (mode_import && mode_get_pubkey)
+        errx(1, "--import-key and --get-pubkey are exclusive");
+    if (mode_import && (!host_pub_x || !host_pub_y))
+        errx(1, "--import-key needs --pubx-hex and --puby-hex");
+    if (!mode_import && (host_pub_x || host_pub_y))
+        errx(1, "--pubx-hex/--puby-hex only go with --import-key");
 
     uint64_t t0 = 0;
 
@@ -218,147 +234,58 @@ int main(int argc, char *argv[]) {
              err_origin);
     ra_perf_log("teec_open_session", ra_perf_now_us() - t0);
 
-    /* Convert plain key to black key */
-    if (mode_convert) {
-        uint8_t *plain_key = NULL;
-        size_t plain_key_len = 0;
+    /* Install a key generated elsewhere in the PTA */
+    if (mode_import) {
+        TEEC_Operation op = {0};
 
-        if (parse_hex(argv[2], &plain_key, &plain_key_len) != 0)
-            errx(1, "Invalid plain key hex");
+        op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INPUT,
+                                         TEEC_MEMREF_TEMP_INPUT,
+                                         TEEC_MEMREF_TEMP_INPUT, TEEC_NONE);
+        op.params[0].tmpref.buffer = host_pub_x;
+        op.params[0].tmpref.size = PUBKEY_COORD_SIZE;
+        op.params[1].tmpref.buffer = host_pub_y;
+        op.params[1].tmpref.size = PUBKEY_COORD_SIZE;
+        op.params[2].tmpref.buffer = host_priv;
+        op.params[2].tmpref.size = PUBKEY_COORD_SIZE;
 
-        if (plain_key_len != 32)
-            errx(1, "Plain key must be 32 bytes for P-256");
-
-        TEEC_Operation op_c = {0};
-        uint8_t black_key[512] = {0};
-
-        op_c.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INPUT,
-                                           TEEC_MEMREF_TEMP_OUTPUT,
-                                           TEEC_NONE,
-                                           TEEC_NONE);
-        op_c.params[0].tmpref.buffer = plain_key;
-        op_c.params[0].tmpref.size = plain_key_len;
-        op_c.params[1].tmpref.buffer = black_key;
-        op_c.params[1].tmpref.size = sizeof(black_key);
-
-        printf("\nConverting plain key to black key...\n");
+        printf("\nImporting the signing key into the PTA...\n");
         t0 = ra_perf_now_us();
-        res = TEEC_InvokeCommand(&sess, TA_REMOTE_ATTESTATION_CMD_CONVERT_TO_BLACKKEY,
-                                 &op_c, &err_origin);
-        if (res != TEEC_SUCCESS) {
-            free(plain_key);
-            errx(1, "Convert key failed 0x%x origin 0x%x", res, err_origin);
-        }
-        ra_perf_log("blackkey_convert", ra_perf_now_us() - t0);
+        res = TEEC_InvokeCommand(&sess, TA_REMOTE_ATTESTATION_CMD_IMPORT_KEY,
+                                 &op, &err_origin);
+        if (res != TEEC_SUCCESS)
+            errx(1, "Import key failed 0x%x origin 0x%x", res, err_origin);
+        ra_perf_log("key_import", ra_perf_now_us() - t0);
 
-        printf("BlackKey(hex): ");
-        print_binary_in_hex(black_key, op_c.params[1].tmpref.size);
-        free(plain_key);
-        printf("Key conversion completed.\n");
+        print_public_key(host_pub_x, host_pub_y);
+        printf("Key import completed.\n");
         return 0;
     }
 
-    /* Generate new black key from scratch */
-    if (mode_generate) {
-        TEEC_Operation op_p = {0};
-        uint8_t pub_x[32] = {0};
-        uint8_t pub_y[32] = {0};
-        /* First call: size probe for black key */
-        op_p.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_OUTPUT,
-                                           TEEC_MEMREF_TEMP_OUTPUT,
-                                           TEEC_MEMREF_TEMP_OUTPUT,
-                                           TEEC_NONE);
-        op_p.params[0].tmpref.buffer = NULL;
-        op_p.params[0].tmpref.size = 0;
-        op_p.params[1].tmpref.buffer = pub_x;
-        op_p.params[1].tmpref.size = sizeof(pub_x);
-        op_p.params[2].tmpref.buffer = pub_y;
-        op_p.params[2].tmpref.size = sizeof(pub_y);
-        printf("\nGenerating new black key...\n");
+    /* Read back the public key, which generates the key on first use */
+    if (mode_get_pubkey) {
+        TEEC_Operation op = {0};
+        uint8_t pub_x[PUBKEY_COORD_SIZE] = {0};
+        uint8_t pub_y[PUBKEY_COORD_SIZE] = {0};
+
+        op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_OUTPUT,
+                                         TEEC_MEMREF_TEMP_OUTPUT, TEEC_NONE,
+                                         TEEC_NONE);
+        op.params[0].tmpref.buffer = pub_x;
+        op.params[0].tmpref.size = sizeof(pub_x);
+        op.params[1].tmpref.buffer = pub_y;
+        op.params[1].tmpref.size = sizeof(pub_y);
+
         t0 = ra_perf_now_us();
-        res = TEEC_InvokeCommand(&sess, TA_REMOTE_ATTESTATION_CMD_GENERATE_BLACKKEY,
-                                 &op_p, &err_origin);
-        if (res != TEEC_ERROR_SHORT_BUFFER && res != TEEC_SUCCESS)
-            errx(1, "Generate black key (size-probe) failed 0x%x origin 0x%x", res, err_origin);
-        if (op_p.params[0].tmpref.size == 0)
-            errx(1, "Generate black key returned zero-size key blob");
-        size_t blob_len = op_p.params[0].tmpref.size;
-        uint8_t *blob = (uint8_t *)malloc(blob_len);
-        if (!blob) errx(1, "Out of memory");
-        /* Second call: fetch key blob */
-        op_p.params[0].tmpref.buffer = blob;
-        res = TEEC_InvokeCommand(&sess, TA_REMOTE_ATTESTATION_CMD_GENERATE_BLACKKEY,
-                                 &op_p, &err_origin);
-        if (res != TEEC_SUCCESS) {
-            free(blob);
-            errx(1, "Generate black key (fetch) failed 0x%x origin 0x%x", res, err_origin);
-        }
-        /* Includes both invocations (size probe + fetch = two keygens) */
-        ra_perf_log("blackkey_generate", ra_perf_now_us() - t0);
+        res = TEEC_InvokeCommand(&sess, TA_REMOTE_ATTESTATION_CMD_GET_PUBLIC_KEY,
+                                 &op, &err_origin);
+        if (res != TEEC_SUCCESS)
+            errx(1, "Get public key failed 0x%x origin 0x%x", res,
+                 err_origin);
+        ra_perf_log("key_get_pubkey", ra_perf_now_us() - t0);
 
-        printf("BlackKey(hex): ");
-        print_binary_in_hex(blob, op_p.params[0].tmpref.size);
-        printf("PubX(hex): ");
-        print_binary_in_hex(pub_x, sizeof(pub_x));
-        printf("PubY(hex): ");
-        print_binary_in_hex(pub_y, sizeof(pub_y));
-
-        /* FullKey = PubX || PubY || blob — pass directly to --key-hex */
-        size_t full_len = sizeof(pub_x) + sizeof(pub_y) +
-                          op_p.params[0].tmpref.size;
-        uint8_t *full = (uint8_t *)malloc(full_len);
-        if (full) {
-            memcpy(full, pub_x, sizeof(pub_x));
-            memcpy(full + sizeof(pub_x), pub_y, sizeof(pub_y));
-            memcpy(full + sizeof(pub_x) + sizeof(pub_y), blob,
-                   op_p.params[0].tmpref.size);
-            printf("FullKey(hex): ");
-            print_binary_in_hex(full, full_len);
-            free(full);
-        }
-
-        free(blob);
-        printf("Black key generation completed.\n");
+        print_public_key(pub_x, pub_y);
         return 0;
     }
-
-    /* Optional: pass private key from host (SW 'd' or CAAM black key) */
-
-    /*
-     * Build packed key param: PubX(32) || PubY(32) || key_blob(N)
-     *
-     * If --key-hex value is >= 65 bytes, treat it as a FullKey
-     * (PubX||PubY||blob already concatenated).
-     * Otherwise, --pubx-hex and --puby-hex are required alongside --key-hex.
-     */
-    uint8_t *packed_key_param = NULL;
-    size_t packed_key_param_len = 0;
-
-    if (host_key && host_key_len > 0) {
-        if (host_key_len >= MIN_KEY_PARAM_SIZE && !host_pub_x && !host_pub_y) {
-            /* FullKey format: already PubX||PubY||blob */
-            packed_key_param = host_key;
-            packed_key_param_len = host_key_len;
-        } else if (host_pub_x && host_pub_y) {
-            /* Separate pubkey + key blob */
-            packed_key_param_len = 32 + 32 + host_key_len;
-            packed_key_param = (uint8_t *)malloc(packed_key_param_len);
-            if (!packed_key_param)
-                errx(1, "Out of memory");
-            memcpy(packed_key_param, host_pub_x, 32);
-            memcpy(packed_key_param + 32, host_pub_y, 32);
-            memcpy(packed_key_param + 64, host_key, host_key_len);
-        } else {
-            errx(1, "--key-hex requires --pubx-hex and --puby-hex "
-                 "(or pass FullKey directly)");
-        }
-    }
-
-    /* Key-path label for the RA_PERF log lines */
-    if (packed_key_param && packed_key_param_len > 0)
-        ra_perf_keymode = packed_key_param_len > 96 ? "black" : "plain";
-    else
-        ra_perf_keymode = "embedded";
 
     for (long iter = 0; iter < loop_count; iter++) {
         ChallengeResponseSession *session = NULL;
@@ -390,26 +317,14 @@ int main(int argc, char *argv[]) {
         uint8_t cbor_evidence[1024] = {0};
         TEEC_Operation op = {0};
 
-        if (packed_key_param && packed_key_param_len > 0) {
-            /* Params: nonce(in), output(out), packed_key(in) */
-            op.paramTypes = TEEC_PARAM_TYPES(
-                TEEC_MEMREF_TEMP_INPUT, TEEC_MEMREF_TEMP_OUTPUT,
-                TEEC_MEMREF_TEMP_INPUT, TEEC_NONE);
-        } else {
-            /* Params: nonce(in), output(out) */
-            op.paramTypes = TEEC_PARAM_TYPES(
-                TEEC_MEMREF_TEMP_INPUT, TEEC_MEMREF_TEMP_OUTPUT,
-                TEEC_NONE, TEEC_NONE);
-        }
+        /* Params: nonce(in), output(out) */
+        op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INPUT,
+                                         TEEC_MEMREF_TEMP_OUTPUT, TEEC_NONE,
+                                         TEEC_NONE);
         op.params[0].tmpref.buffer = (uint8_t *)nonce;
         op.params[0].tmpref.size = nonce_sz;
         op.params[1].tmpref.buffer = cbor_evidence;
         op.params[1].tmpref.size = sizeof(cbor_evidence);
-        /* param[2] is packed key: PubX(32) || PubY(32) || key_blob(N) */
-        if (packed_key_param && packed_key_param_len > 0) {
-            op.params[2].tmpref.buffer = packed_key_param;
-            op.params[2].tmpref.size = packed_key_param_len;
-        }
 
         printf("\nInvoke TA.\n");
         t0 = ra_perf_now_us();
@@ -442,11 +357,9 @@ int main(int argc, char *argv[]) {
         ra_perf_log("total", ra_perf_now_us() - t_total);
     }
 
-    if (packed_key_param && packed_key_param != host_key)
-        free(packed_key_param);
-    if (host_key) free(host_key);
-    if (host_pub_x) free(host_pub_x);
-    if (host_pub_y) free(host_pub_y);
+    free(host_priv);
+    free(host_pub_x);
+    free(host_pub_y);
 
     return 0;
 }
