@@ -13,7 +13,6 @@ attester/remote_attestation/ta/*.stripped.elf
 attester/remote_attestation/ta/*.ta
 attester/remote_attestation/ta/dyn_list
 attester/remote_attestation/ta/ta.lds
-attester/remote_attestation/ta/include/pta_remote_attestation.h
 
 # Yocto work dir
 attester/container-imx/yocto

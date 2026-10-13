@@ -86,10 +86,15 @@ RUN cd ${OPTEE_DIR} \
            ${OPTEE_DIR}/build/common.mk \
     && make -j$(nproc)
 
-RUN cd ${OPTEE_DIR}/optee_os/core/pta \
-    && if ! grep -q "^subdirs-y += remote_attestation" sub.mk; then \
-        printf "\\nsubdirs-y += remote_attestation\\n" >> sub.mk; \
-    fi
+# The attestation PTA is OP-TEE's own veraison_attestation PTA with the series
+# this project submitted upstream (https://github.com/OP-TEE/optee_os/pull/8109
+# and its follow-up), the same patches the Yocto layer applies to the NXP tree
+COPY --chown=${USERNAME}:${USERNAME} \
+    container-imx/meta-veraison-attestation/recipes-security/optee/optee-os/*.patch \
+    ${OPTEE_DIR}/veraison-attestation-patches/
+RUN cd ${OPTEE_DIR}/optee_os \
+    && git -c user.name=attester -c user.email=attester@localhost \
+        am ${OPTEE_DIR}/veraison-attestation-patches/*.patch
 
 # Install rust to build rust-apiclient
 USER ${USERNAME}:${USERNAME}
