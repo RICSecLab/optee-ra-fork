@@ -162,63 +162,55 @@ Open での確認が終わってから実行:
 echo "192.168.8.244 relying-party-service" >> /etc/hosts
 ```
 
+デバイスの鍵を読み出し（まだ鍵がなければここで PTA が生成します）、Verifier に
+登録します（README の 8.1 節）:
+
+```bash
+optee_remote_attestation --get-pubkey
+```
+
 実行:
 
 ```bash
-optee_remote_attestation --key-hex <FullKey>
+optee_remote_attestation
 ```
 
 期待値: `ear.status: "affirming"`。
 
-Secure Boot 前に生成した BlackKey を Close 後に使うと、
-`Failed to sign payload` / `TEEC_InvokeCommand failed` となり失敗するのが正常です。
-Secure Boot により CAAM の鍵文脈（MPMR/BKEK）が変わるため、古い BlackKey は無効になります。
+Close 前に生成した鍵は Close をまたいでは使えません。Secure Boot により CAAM の
+鍵文脈（MPMR/BKEK）が変わるため、保存されている CAAM blob を開けなくなり、
+evidence 生成が失敗します（`TEEC_InvokeCommand failed`）。鍵オブジェクトを消して
+TEE を再起動し（README の 8.3 節）、新しい鍵を読み出して登録し直してください。
 
-## 10) BlackKey 使い回し不可の検証（2台）
+## 10) デバイスごとの鍵（2台）
 
-CAAM BlackKey がデバイス固有であることを検証します。同じ SRK fuse 値を持つ
-2台のデバイスでも、各デバイスの JDKEK（ハードウェア固有のエントロピーから
-導出）が異なるため、BlackKey は別デバイスでは使用できません。
+PTA が保存する CAAM blob はデバイス固有です。ハードウェア固有のエントロピーから
+導出される各デバイスの JDKEK でラップされるため、同じ SRK で Close した 2 台でも
+署名鍵は別々になり、Verifier はそれぞれを知っている必要があります。blob は PTA の
+外に出ないので、この性質は Verifier 側で確認します。鍵が登録されていないデバイスは
+拒否されます。
 
-両方の実機を **同じ SRK** で Close しておきます（手順 8-9）。
+両方の実機を **同じ SRK** で Close し（手順 7-8）、Device A は手順 9 のとおり
+登録しておきます。
 
-### 10.1 Device A の BlackKey を Device B で使用
+### 10.1 Device B を未登録の自身の鍵で実行
 
-**Device A** で BlackKey を生成:
-
-```bash
-optee_remote_attestation --generate-blackkey
-# FullKey を控える
-```
-
-**Device B** で Device A の FullKey を使用:
+**Device B** で:
 
 ```bash
-optee_remote_attestation --key-hex <FullKey-from-A>
-```
-
-期待: `Failed to sign payload` — Device B の CAAM は Device A の BlackKey
-blob を復号できないため、署名に失敗します。
-
-### 10.2 Device B で新規 BlackKey を生成
-
-```bash
-optee_remote_attestation --generate-blackkey
-# FullKey を控える
-optee_remote_attestation --key-hex <FullKey-from-B>
+optee_remote_attestation --get-pubkey
+optee_remote_attestation
 ```
 
 期待: `ear.status: "contraindicated"`、`"no trust anchor for evidence"`。
 
-署名は成功しますが、Device B の公開鍵（`psa-instance-id`）が Verifier に
-登録されていないため、アテステーションは失敗します。
+Device B は自身の鍵で署名します（fuse、参照値、boot signer は A と同じ）が、
+その公開鍵、したがって `psa-instance-id` が trust anchor として登録されていません。
 
-### 10.3 Device B を Verifier に登録して検証
+### 10.2 Device B を Verifier に登録して検証
 
-Device B のアテステーションを成功させるには、Verifier に trust anchor を
-追加登録します。`--generate-blackkey` で出力された PubX/PubY から
-instance-id と PEM 公開鍵を計算し（手順 9 のヘルパー参照）、Device B 用の
-provisioning JSON を作成して submit します:
+`--get-pubkey` の出力から instance-id と PEM 公開鍵を計算し（README の 8 節の
+ヘルパー参照）、Device B 用の provisioning JSON を作成して submit します:
 
 ```bash
 # Device B の trust anchor をビルド・登録
@@ -242,7 +234,7 @@ veraison -- cocli corim submit \
 **Device B** で再度アテステーションを実行:
 
 ```bash
-optee_remote_attestation --key-hex <FullKey-from-B>
+optee_remote_attestation
 ```
 
 期待: `ear.status: "affirming"`。
@@ -251,9 +243,9 @@ optee_remote_attestation --key-hex <FullKey-from-B>
 
 | テスト | 結果 | 意味 |
 |--------|------|------|
-| A の BlackKey を B で使用 | `Failed to sign` | BlackKey はデバイス固有（JDKEK が異なる） |
-| B の新規 BlackKey（未登録） | `no trust anchor` | 鍵ペアが異なり instance-id が Verifier に未登録 |
-| B の BlackKey を登録後 | `affirming` | trust anchor 追加後、アテステーション成功 |
+| Device B、鍵未登録 | `no trust anchor` | 各デバイスは自身の CAAM に結び付いた鍵で署名し、その instance-id を Verifier が知らない |
+| Device B を登録後 | `affirming` | trust anchor 追加後、アテステーション成功 |
+| Close 前に生成した鍵 | evidence 生成失敗 | CAAM blob は secure state に結び付く。Close 後に作り直す |
 
 ## 注意事項
 

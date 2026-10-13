@@ -175,65 +175,58 @@ If `relying-party-service` is not resolvable, add it:
 echo "192.168.8.244 relying-party-service" >> /etc/hosts
 ```
 
+Read the device key, which the PTA generates now if the device has none
+yet, and register it with the Verifier (README section 8.1):
+
+```bash
+optee_remote_attestation --get-pubkey
+```
+
 Run attestation:
 
 ```bash
-optee_remote_attestation --key-hex <FullKey>
+optee_remote_attestation
 ```
 
 Expected: `ear.status: "affirming"`.
 
-If you reuse a BlackKey generated before closing the device, attestation should fail
-(e.g. `Failed to sign payload` / `TEEC_InvokeCommand failed`). Secure Boot changes
-the CAAM key context (MPMR/BKEK), so old BlackKeys are no longer valid.
+A key generated before closing the device does not survive the closing:
+Secure Boot changes the CAAM key context (MPMR/BKEK), so the stored CAAM
+blob can no longer be unwrapped and evidence generation fails
+(`TEEC_InvokeCommand failed`). Wipe the key object and restart the TEE
+(README section 8.3), then read and register the new key.
 
-## 11) BlackKey non-reuse test (two devices)
+## 11) Per-device keys (two devices)
 
-This test proves that CAAM BlackKeys are device-bound. Even when two devices
-share the same SRK fuse values, each device's JDKEK (derived from unique
-hardware entropy) encrypts BlackKeys differently, so a BlackKey generated on
-one device cannot be used on another.
+The CAAM blob the PTA stores is bound to the device: it is wrapped with the
+device's JDKEK, derived from unique hardware entropy, so two devices closed
+with the same SRK still sign with different keys, and the Verifier must know
+each of them. The blob never leaves the PTA, so this is checked through the
+Verifier: a device whose key is not registered is rejected.
 
-Both devices must be **closed** with the same SRK (Steps 8-9).
+Both devices must be **closed** with the same SRK (Steps 8-9), and Device A
+registered as in Step 10.
 
-### 11.1 Test A's BlackKey on Device B
+### 11.1 Device B with its own, unregistered key
 
-Generate a BlackKey on **Device A**:
-
-```bash
-optee_remote_attestation --generate-blackkey
-# Save FullKey(hex)
-```
-
-Use Device A's FullKey on **Device B**:
+On **Device B**:
 
 ```bash
-optee_remote_attestation --key-hex <FullKey-from-A>
-```
-
-Expected: `Failed to sign payload` — Device B's CAAM cannot decrypt A's
-BlackKey blob, so signing fails.
-
-### 11.2 Generate a new BlackKey on Device B
-
-```bash
-optee_remote_attestation --generate-blackkey
-# Save FullKey(hex)
-optee_remote_attestation --key-hex <FullKey-from-B>
+optee_remote_attestation --get-pubkey
+optee_remote_attestation
 ```
 
 Expected: `ear.status: "contraindicated"` with `"no trust anchor for evidence"`.
 
-Signing succeeds because Device B's CAAM can use its own BlackKey, but the
-Verifier rejects the evidence because Device B's public key (and therefore its
-`psa-instance-id`) is not registered as a trust anchor.
+Device B signs with its own key (the fuses, the reference values and the
+boot signer are the same as A's), but its public key, and so its
+`psa-instance-id`, is not registered as a trust anchor.
 
-### 11.3 Register Device B and verify
+### 11.2 Register Device B and verify
 
-To make Device B's attestation succeed, register its trust anchor with the
-Verifier. Compute the instance-id and PEM public key from the PubX/PubY
-output of `--generate-blackkey` (see Step 10 for the helper scripts), then
-create a provisioning JSON with Device B's values and submit it:
+Compute the instance-id and PEM public key from the `--get-pubkey` output
+(see the helper in README section 8), create a provisioning JSON with
+Device B's values and submit it:
 
 ```bash
 # Build and submit Device B's trust anchor
@@ -257,7 +250,7 @@ veraison -- cocli corim submit \
 Run attestation again on **Device B**:
 
 ```bash
-optee_remote_attestation --key-hex <FullKey-from-B>
+optee_remote_attestation
 ```
 
 Expected: `ear.status: "affirming"`.
@@ -266,9 +259,9 @@ Expected: `ear.status: "affirming"`.
 
 | Test | Result | Meaning |
 |------|--------|---------|
-| A's BlackKey on B | `Failed to sign` | BlackKey is device-bound (JDKEK differs) |
-| B's new BlackKey (unregistered) | `no trust anchor` | Key pair differs, instance-id unknown to Verifier |
-| B's BlackKey after registration | `affirming` | Trust anchor added, attestation succeeds |
+| Device B, key unregistered | `no trust anchor` | Each device signs with its own CAAM-bound key; its instance-id is unknown to the Verifier |
+| Device B after registration | `affirming` | Trust anchor added, attestation succeeds |
+| Key from before the close | evidence fails | The CAAM blob is bound to the secure state; start over after closing |
 
 ## Notes
 

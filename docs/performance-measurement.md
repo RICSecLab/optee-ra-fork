@@ -8,6 +8,17 @@ collected for performance evaluation.
 The Japanese version of this document is
 [performance-measurement-j.md](performance-measurement-j.md).
 
+> **Note.** The `pta` layer of this document belongs to the project's earlier
+> fork of the attestation PTA (`attester/pta_remote_attestation`, retired when
+> the attester moved to OP-TEE's `veraison_attestation` PTA with the series
+> submitted as https://github.com/OP-TEE/optee_os/pull/8109). The upstream PTA
+> has no RA_PERF points, and the key modes `embedded`/`plain`/`black` no
+> longer exist: the PTA always signs with the key it holds, logged as
+> `key=pta`. The `host` and `ta` lines still work as described (without the
+> black-key events); the `pta` tables, the black-key comparison protocol and
+> the `imx-caam`/`imx-cpu` provisioning data are kept as the record of the
+> measurement made with the fork.
+
 ## Log format
 
 Every measurement is a single line:

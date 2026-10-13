@@ -7,6 +7,16 @@ CBOR/COSE エンコード、CAAM 署名、ブラックキー処理など)ごと�
 英語版は [performance-measurement.md](performance-measurement.md) を参照
 してください。
 
+> **注意** 本文書の `pta` レイヤは、本プロジェクトの以前のフォーク PTA
+> (`attester/pta_remote_attestation`。attester が本家 OP-TEE の
+> `veraison_attestation` PTA と https://github.com/OP-TEE/optee_os/pull/8109
+> として提出した一連の変更に移行した際に廃止)のものです。本家の PTA には
+> RA_PERF のログポイントはなく、鍵モード `embedded`/`plain`/`black` もありません。
+> PTA は常に自身が保持する鍵で署名し、`key=pta` と記録されます。`host` と `ta`
+> の行は(ブラックキー関連のイベントを除き)本文書のとおり動作します。`pta` の表、
+> ブラックキー比較のプロトコル、`imx-caam`/`imx-cpu` の provisioning データは、
+> フォーク PTA で行った計測の記録として残しています。
+
 ## ログフォーマット
 
 計測 1 件につき 1 行を出力します:

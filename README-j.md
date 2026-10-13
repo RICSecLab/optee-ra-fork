@@ -183,11 +183,11 @@ go build -o rp main.go
 ./attester/container/launch_soc_term.sh secure
 ```
 
-#### 4.4. ユーザが追加した CA/TA/PTA のビルドと、QEMU の起動とログイン
+#### 4.4. ユーザが追加した CA/TA のビルドと、QEMU の起動とログイン
 
-手順 4.1. で起動したターミナルで以下コマンドをを実行してください。ユーザが追加した CA/TA/PTA を再ビルドし、QEMU を起動します。コンテナイメージが `/optee/optee_os/core/pta/sub.mk` に `subdirs-y += remote_attestation` を自動で追加するため、手動編集は不要です。
+手順 4.1. で起動したターミナルで以下コマンドを実行してください。ユーザが追加した CA/TA を再ビルドし、QEMU を起動します。PTA は OP-TEE 本体の `veraison_attestation` PTA で、本プロジェクトのパッチ群（[attester/container-imx/meta-veraison-attestation/recipes-security/optee/optee-os/](attester/container-imx/meta-veraison-attestation/recipes-security/optee/optee-os/) 以下。本家には https://github.com/OP-TEE/optee_os/pull/8109 として提出）はコンテナイメージのビルド時に当てられています。必要なのはビルドフラグだけです。
 ```sh
-make -C ${OPTEE_DIR}/build run CFG_REMOTE_ATTESTATION_PTA=y -j
+make -C ${OPTEE_DIR}/build run CFG_VERAISON_ATTESTATION_PTA=y -j
 ```
 
 QEMU が立ち上がったら、c を入力します。
@@ -358,17 +358,12 @@ Sourced Data [none]: The Evidence received is insufficient to make a conclusion.
 
 #### 6.1. 登録されていない TA からのアテステーションリクエスト
 
-はじめに、録されてない TA から PTA にリクエストを送り、リモートアテステーションが失敗する流れを確認します。例えば、以下のように [`attester/pta_remote_attestation/remote_attestation/remote_attestation.c`](attester/pta_remote_attestation/remote_attestation/remote_attestation.c) の `IMPLEMENTATION_ID` を書き換えると、TA のコードハッシュと implementation ID が変わり、PTA が生成する CBOR(COSE) evidence の内容が変わります。これにより、provisioning されているデータと異なるので、アテステーションが失敗するはずです。
-```c
-diff --git a/attester/pta_remote_attestation/remote_attestation/remote_attestation.c b/attester/pta_remote_attestation/remote_attestation/remote_attestation.c
---- a/attester/pta_remote_attestation/remote_attestation/remote_attestation.c
-+++ b/attester/pta_remote_attestation/remote_attestation/remote_attestation.c
- /* Implementation ID used in PSA evidence */
--#define IMPLEMENTATION_ID     "qemu-optee-ra-000000000000000001"
-+#define IMPLEMENTATION_ID     "qemu-optee-ra-000000000000000002"
+はじめに、登録されていない TA から PTA にリクエストを送り、リモートアテステーションが失敗する流れを確認します。例えば、TA を別の implementation ID でビルドすると（[`attester/remote_attestation/ta/include/remote_attestation_ta.h`](attester/remote_attestation/ta/include/remote_attestation_ta.h) の `RA_IMPLEMENTATION_ID`。ビルド時に `CFG_RA_IMPLEMENTATION_ID` で指定します）、TA のコードハッシュと implementation ID が変わり、PTA が生成する CBOR(COSE) evidence の内容が変わります。これにより、provisioning されているデータと異なるので、アテステーションが失敗するはずです。
+```sh
+make -C ${OPTEE_DIR}/build run CFG_VERAISON_ATTESTATION_PTA=y CFG_RA_IMPLEMENTATION_ID=qemu-optee-ra-000000000000000002 -j
 ```
 
-実際に、コードを書き換えた後にアテステーションリクエストを送信してみます。手順 4.4. で QEMU を起動したターミナルで `ctrl+c` をして、一度 QEMU を終了します。その後、もう一度手順 4.4 に従い、TA の再ビルド・QEMU の再起動をします。
+実際に、ビルドし直した TA でアテステーションリクエストを送信してみます。手順 4.4. で QEMU を起動したターミナルで `ctrl+c` をして、一度 QEMU を終了します。その後、手順 4.4 のコマンドの代わりに上のコマンドを実行し、TA の再ビルド・QEMU の再起動をします。
 
 その後、手順 4.5. に従い、アテステーションリクエストを送り、手順 5. に従い結果を確認すると、以下のようなアテステーション結果が得られます。`"ear.status": "contraindicated"` になっており、アテステーションに失敗していることがわかります。 
 ```txt
@@ -595,8 +590,10 @@ docker network rm veraison-net
 ### 8. i.MX8MP 実機でのアテステーション
 
 本セクションでは i.MX8MP EVK 実機上で PSA Remote Attestation を実行し、
-Veraison で検証する手順を説明します。埋め込みテスト鍵、CAAM ブラックキー新規生成、
-既存鍵の変換の 3 つのシナリオを扱います。
+Veraison で検証する手順を説明します。evidence はデバイス上で PTA が自分で
+保持する鍵で署名されるため、Verifier にはデバイスごとに 1 つの trust anchor が
+必要です。鍵の用意の仕方として、PTA が初回利用時に生成する方法と、別の場所で
+生成した鍵をインポートする方法の 2 つを扱います。
 
 #### 8.0 i.MX8MP Yocto ビルドと SD 書き込み
 
@@ -626,6 +623,16 @@ YOCTO_DIR=/dev/shm/yocto ./yocto.sh
 
 注意: i.MX8MP は SD 先頭の `imx-boot` に埋め込まれた `tee.bin` を使用します。`./yocto.sh optee-os` は `imx-boot` の再ビルドまで実行しますが、SD 書き込み用の WIC を更新するには `./yocto.sh`（full）で再パッケージしてください。
 
+イメージの OP-TEE OS は NXP の 4.6.0.imx ツリーに、本家の `veraison_attestation`
+PTA と本プロジェクトが OP-TEE に提出した一連の変更
+（https://github.com/OP-TEE/optee_os/pull/8109 とその続編）を
+[`optee-os_%.imx.bbappend`](attester/container-imx/meta-veraison-attestation/recipes-security/optee/optee-os_%.imx.bbappend)
+がパッチとして当てたものです。PTA は `CFG_VERAISON_ATTESTATION_PTA_TEST_KEY=n`
+（署名鍵はビルド時の鍵ではなく secure storage から）と
+`CFG_VERAISON_ATTESTATION_PTA_PLATFORM_CLAIMS=y`（lifecycle と boot signer を
+fuse から）でビルドされ、`local.conf` の `CFG_NXP_CAAM=y CFG_NXP_CAAM_ECC_DRV=y`
+により鍵は CAAM ブラックキーになります。
+
 出力イメージ:
 ```
 ${YOCTO_DIR}/build/tmp/deploy/images/imx8mpevk/core-image-minimal-imx8mpevk.rootfs.wic.zst
@@ -645,7 +652,7 @@ sudo dd if=core-image-minimal-imx8mpevk.rootfs.wic of=/dev/sdX bs=4M status=prog
 | 項目 | 詳細 |
 |------|------|
 | ボード | i.MX8MP EVK |
-| ビルド | `core-image-minimal` (Yocto + OP-TEE + veraison-attestation PTA) |
+| ビルド | `core-image-minimal` (Yocto + アテステーション PTA 入りの OP-TEE + veraison-attestation の TA とクライアント) |
 | Veraison | Docker デプロイメント (`services/deployments/docker/`) |
 | ネットワーク | デバイスと Veraison ホストが IP 到達可能 |
 | SD カード | imx-boot と rootfs の両方を含む WIC イメージ |
@@ -666,21 +673,38 @@ services/deployments/docker/veraison start
 source services/deployments/docker/env.bash
 ```
 
+#### 署名鍵
+
+PTA は鍵が最初に必要になったとき（最初の evidence 生成、または `--get-pubkey`）
+に ECDSA P-256 鍵を生成し、自身の private secure storage に保存します。保存先は、
+マシンフィーチャ `optee-ftpm` がある場合は eMMC の RPMB
+（[docs/ftpm-imx8mp-j.md](docs/ftpm-imx8mp-j.md) 参照）、ない場合は rootfs 上の
+`/var/lib/tee` 配下の REE FS（`tee-supplicant` が提供）です。CAAM ECC ドライバを
+使うビルドでは、保存されるオブジェクトは CAAM ブラックキーの blob です。秘密鍵が
+平文で存在するのは CAAM の内部だけで、blob はデバイスに（Close 後はその secure
+state にも）結び付きます（[docs/secure-boot-imx8mp-j.md](docs/secure-boot-imx8mp-j.md)
+参照）。
+
+鍵は PTA の外に出ず、置き換えられることもありません。すべての TA の evidence が
+この鍵で署名されます。クライアントからできるのは次の 2 つだけです。
+
+- 公開鍵と、そこから導出される instance-id を表示する
+  （`optee_remote_attestation --get-pubkey`）
+- PTA がまだ鍵を持たない間に、別の場所で生成した鍵を入れる
+  （`optee_remote_attestation --import-key`）。Verifier が鍵を事前に知っている
+  provisioning フロー向けで、インポートした鍵も同じように CAAM でラップされます。
+  鍵がある状態でのインポートは `0xffff0003`（`TEE_ERROR_ACCESS_CONFLICT`）で
+  拒否されます。
+
+鍵を作り直すには、鍵オブジェクトを消して TEE を再起動します（8.3 参照）。
+
 #### Provisioning ヘルパー: Instance ID と PEM 公開鍵の計算
 
-全シナリオ共通で `instance-id = 0x01 || SHA-256(0x04 || PubX || PubY)` です。
-CAAM 鍵を使う場合（シナリオ B, C）は、ホスト側で PubX/PubY から instance ID と
-PEM 公開鍵を計算します:
+`instance-id = 0x01 || SHA-256(0x04 || PubX || PubY)` で、`--get-pubkey` が hex で
+表示します。trust anchor には base64 の instance-id と PEM の公開鍵が必要です:
 
 ```bash
-python3 -c "
-import hashlib, base64
-pub_x = bytes.fromhex('<PubX hex>')
-pub_y = bytes.fromhex('<PubY hex>')
-digest = hashlib.sha256(b'\x04' + pub_x + pub_y).digest()
-instance_id = b'\x01' + digest
-print('instance_id (base64):', base64.b64encode(instance_id).decode())
-"
+python3 -c "import base64; print(base64.b64encode(bytes.fromhex('<InstanceID hex>')).decode())"
 ```
 
 ```bash
@@ -704,120 +728,117 @@ print(pem.strip())
 ```
 
 計算した値で `provisoning/data/comid-psa-ta-imx.json` の `instance` と
-`verification-keys` を更新してください。
+`verification-keys` を更新してください。参照値（`comid-psa-refval-imx.json`）は
+鍵に依存しません（8.4 参照）。
 
-#### 8.1 シナリオ A: 埋め込みテスト鍵
+#### 8.1 シナリオ A: デバイス上で生成した鍵
 
-PTA に埋め込まれたテスト用 ECDSA P-256 鍵で evidence に署名します。
-デバイス側での鍵管理は不要です。
-
-| 項目 | 値 |
-|------|-----|
-| PubX | `30a0424cd21c2944838a2d75c92b37e76ea20d9f00893a3b4eee8a3c0aafec3e` |
-| PubY | `e04b65e92456d9888b52b379bdfbd51ee869ef1f0fc65b6659695b6cce081723` |
-| Instance ID | `AZDHHoAwT5jWVWpALAWTszqArL0I5K/5xAKfbhfhA5lR` |
-
-**Provisioning**:
+**手順 1 — 公開鍵の読み出し**（デバイス側）。鍵のないデバイスではここで鍵が
+生成されます:
 ```bash
-services/deployments/docker/veraison clear-stores
-./provisoning/run.sh imx
-```
-
-デフォルトの `comid-psa-ta-imx.json` にはテスト鍵の trust anchor が設定済みです。
-
-**Attestation 実行** (デバイス側):
-```bash
-optee_remote_attestation
-```
-
-期待される結果: `"ear.status": "affirming"`
-
-#### 8.2 シナリオ B: CAAM ブラックキー — 新規鍵生成
-
-CAAM モジュールで新しい ECDSA P-256 鍵ペアを生成します。
-秘密鍵は JDKEK で暗号化されており、プレーンテキストではメモリ上に露出しません。
-
-> **注意**: ブラックキーは JDKEK (揮発性) で暗号化されています。
-> 電源サイクルで JDKEK が再生成されるため、**同一ブートセッション内でのみ使用可能**です。
-
-**手順 1 — 鍵生成** (デバイス側):
-```bash
-optee_remote_attestation --generate-blackkey
+optee_remote_attestation --get-pubkey
 ```
 
 出力例:
 ```
-Generating new black key...
-BlackKey(hex): fbbfafca020000002000000...
-PubX(hex): 3d87f38e7b34e5c0bc988becb225783daa4d14dc0031f49588fe61708c4f1f6f
-PubY(hex): 15dc6990d4209e3cb1f732310a4784a535a93962b7d87274286026ec80153ce4
-FullKey(hex): 3d87f38e7b34e5c0...fbbfafca020000002000000...
-Black key generation completed.
+PubX(hex): 9c2676e987bbfab13909276c8682b911079385db43af214130cd2ed7702cc9ee
+PubY(hex): 9634ad954d8d6242b09cb3d657674199cd4bc0ec0956e131386e183f9a64dce9
+InstanceID(hex): 016536dc438322ac02304783260fb224306bb933fcd351aeb6185217e241f9c3be
 ```
 
-**手順 2 — Provisioning** (ホスト側): PubX/PubY から instance ID と PEM 公開鍵を
+以後の呼び出しでは、電源を切った後も同じ値が返ります。
+
+**手順 2 — Provisioning**（ホスト側）: PEM 公開鍵と base64 の instance-id を
 計算し（上記ヘルパー参照）、`comid-psa-ta-imx.json` を更新後:
 ```bash
 services/deployments/docker/veraison clear-stores
 ./provisoning/run.sh imx
 ```
 
-**手順 3 — Attestation 実行** (デバイス側): FullKey をそのまま渡す:
+**手順 3 — Attestation 実行**（デバイス側）:
 ```bash
-optee_remote_attestation --key-hex <FullKey hex>
-```
-
-または各コンポーネントを個別に渡す:
-```bash
-optee_remote_attestation --key-hex <BlackKey hex> --pubx-hex <PubX hex> --puby-hex <PubY hex>
+optee_remote_attestation
 ```
 
 期待される結果: `"ear.status": "affirming"`
 
-#### 8.3 シナリオ C: CAAM ブラックキー — 既存鍵の変換
+#### 8.2 シナリオ B: 別の場所で生成した鍵（インポート）
 
-既存のプレーンテキスト ECDSA P-256 秘密鍵（32 バイトの `d` 値）を
-CAAM ブラックキーに変換します。OpenSSL 等で生成済みの鍵ペアがある場合に使用します。
+PTA がまだ鍵を持たないデバイス（新しいイメージ、または 8.3 の後）向けです。
+鍵ペアをホストで生成し、公開鍵を登録し、秘密鍵を一度だけ入れます:
 
-**手順 1 — 鍵変換** (デバイス側):
 ```bash
-optee_remote_attestation --convert-key <32バイト秘密鍵 hex>
+openssl ecparam -name prime256v1 -genkey -noout -out iak.pem
+openssl ec -in iak.pem -noout -text   # priv: が d、pub: が 04 || PubX || PubY
+```
+
+**手順 1 — インポート**（デバイス側）:
+```bash
+optee_remote_attestation --import-key <d hex> --pubx-hex <PubX hex> --puby-hex <PubY hex>
 ```
 
 出力例:
 ```
-Converting plain key to black key...
-BlackKey(hex): fbbfafca020000002000000...
-Key conversion completed.
+Importing the signing key into the PTA...
+PubX(hex): ...
+PubY(hex): ...
+InstanceID(hex): ...
+Key import completed.
 ```
 
-公開鍵 (PubX/PubY) は出力されません。元の鍵ペアから既知のためです。
+PTA は秘密鍵が公開鍵と一致することを確認してから CAAM でラップし、平文の鍵は
+残しません。
 
-**手順 2 — Provisioning** (ホスト側): 既知の PubX/PubY から instance ID と
-PEM 公開鍵を計算し（上記ヘルパー参照）、`comid-psa-ta-imx.json` を更新後:
-```bash
-services/deployments/docker/veraison clear-stores
-./provisoning/run.sh imx
-```
+**手順 2 — Provisioning** と **手順 3 — Attestation 実行** はシナリオ A と同じです。
 
-**手順 3 — Attestation 実行** (デバイス側):
-```bash
-optee_remote_attestation --key-hex <BlackKey hex> --pubx-hex <PubX hex> --puby-hex <PubY hex>
-```
+#### 8.3 鍵を作り直す
 
-期待される結果: `"ear.status": "affirming"`
+PTA は一度読み込んだ鍵をキャッシュするため、オブジェクトを消した後は TEE の
+再起動が必要です:
+
+- REE FS に保存している場合（`optee-ftpm` なし）: デバイスで
+  `rm -rf /var/lib/tee/*` を実行してから再起動します（ディレクトリ自体は
+  残してください。`teesuppl` ユーザの所有で、`tee-supplicant` は作り直せません）。
+  すべての TA の secure storage が消えます。
+- RPMB に保存している場合（`optee-ftpm` あり）: Linux からは消せません。
+  `CFG_RPMB_RESET_FS=y` で OP-TEE を一度ビルドして起動時に RPMB ファイルシステムを
+  消去し（fTPM の状態も消えます）、その後このオプションなしで再びビルドします。
+
+再起動後、次の `--get-pubkey` または evidence 生成で新しい鍵が生成されるか、
+`--import-key` で鍵を入れられます。8.1 と同様に登録してください。デバイスを
+Close（Secure Boot）する前に生成した鍵も Close をまたいでは使えません。CAAM の
+blob は secure state に結び付くためで、鍵は Close 後に生成（またはインポート）し、
+Close 前に生成していた場合は作り直してください。
+
+#### 8.4 evidence の内容
+
+| クレーム | i.MX8MP ビルドでの値 |
+|----------|----------------------|
+| `psa-implementation-id` | `imx8mp-optee-ra-0000000000000001`（TA レシピの `CFG_RA_IMPLEMENTATION_ID`） |
+| `psa-instance-id` | デバイスの鍵の `0x01 \|\| SHA-256(0x04 \|\| PubX \|\| PubY)` |
+| `psa-client-id` | 呼び出し元 TA の UUID から導出（1 から 2^31-1） |
+| `psa-security-lifecycle` | fuse から: Close 済みなら `0x3000`（secured）、SRK fuse 書き込み済みで未 Close なら `0x2000`（PSA RoT provisioning）、未書き込みなら `0x1000`（assembly and test）、field return 後は `0x6000`（decommissioned） |
+| `ARoT` コンポーネント | TA の読み出し専用メモリの SHA-256。signer-id は TA 署名鍵（modulus と exponent）の SHA-256 で、NXP デフォルトの `keys/default_ta.pem` では `ty+NnL9yl7UUSDqhuDTDxU3PCkoIzSVVkHx4g07/xlk=` |
+| `PRoT` コンポーネント | OP-TEE コアの `.text` と `.rodata` の SHA-256、version は OP-TEE のバージョン文字列。signer-id は eFuse 順の SRK ハッシュ（boot signer）で、研究室の SRK では `IPNu4+wT0O2kan7wdvMTGWduHBpp0BeE/uSSn/6Bc2A=` |
+
+measurement value はビルド成果物から
+[provisoning/compute-arot-refval.py](provisoning/compute-arot-refval.py)
+（`.ta`）と
+[provisoning/compute-prot-refval.py](provisoning/compute-prot-refval.py)
+（`tee.elf`）でオフライン計算します（[provisoning/README-j.md](provisoning/README-j.md)
+参照）。PRoT の値は OP-TEE をビルドするたびに変わります。
 
 ## 性能計測ログ (RA_PERF)
 
-アテステーション処理全体の時間と主要イベント(メモリハッシュ、CBOR/COSE
-エンコード、ECDSA/CAAM 署名、ブラックキー処理)ごとの所要時間を、機械可読な
-ログ(`RA_PERF|<layer>|<event>|<duration_us>|key=<keymode>`)として出力でき
-ます。ファームウェア側は `CFG_REMOTE_ATTESTATION_PERF=y` でコンパイルし、
+クライアントと TA は、アテステーション 1 回の処理時間と PTA 呼び出しの所要
+時間を機械可読なログ(`RA_PERF|<layer>|<event>|<duration_us>|key=<keymode>`)
+として出力できます。TA 側は `CFG_REMOTE_ATTESTATION_PERF=y` でコンパイルし、
 クライアント側は実行時に `optee_remote_attestation --perf`(データ収集用に
-`--loop N` / `--no-server` も利用可)で有効化します。ログポイント一覧、
-QEMU/i.MX での有効化手順、CAAM ブラックキー使用有無の比較を含む推奨計測
+`--loop N` / `--no-server` も利用可)で有効化します。ログポイント一覧と計測
 プロトコルは [docs/performance-measurement-j.md](docs/performance-measurement-j.md)
-を参照してください。
+を参照してください。同文書の PTA 内のログポイントと CAAM ブラックキー使用
+有無の比較は、本家の PTA に置き換える前の本プロジェクトのフォーク PTA で計測
+したもので、その計測の記録として残しています。
 
 ## i.MX8MP でのファームウェア TPM と IMA
 
