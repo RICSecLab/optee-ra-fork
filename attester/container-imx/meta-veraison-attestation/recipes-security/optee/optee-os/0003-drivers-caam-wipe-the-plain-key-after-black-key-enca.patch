@@ -1,0 +1,52 @@
+From a40113c65810002359954f3a3d882a9a8fc2c2a8 Mon Sep 17 00:00:00 2001
+From: Yuichi Sugiyama <yuichis@ricsec.co.jp>
+Date: Mon, 12 Oct 2026 12:19:48 +0000
+Subject: [PATCH] drivers: caam: wipe the plain key after black key
+ encapsulation
+
+caam_key_black_encapsulation() copies the plain key into a DMA buffer
+and frees the caller's plain key buffer once the CAAM holds the black
+key, but neither buffer is cleared before it is freed, so the plain
+key stays in the heap.
+
+Clear both.
+
+Upstream-Status: Submitted [https://github.com/OP-TEE/optee_os/pull/8109]
+Signed-off-by: Yuichi Sugiyama <yuichis@ricsec.co.jp>
+---
+ core/drivers/crypto/caam/caam_key.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/core/drivers/crypto/caam/caam_key.c b/core/drivers/crypto/caam/caam_key.c
+index c618159..9c5d0ee 100644
+--- a/core/drivers/crypto/caam/caam_key.c
++++ b/core/drivers/crypto/caam/caam_key.c
+@@ -13,6 +13,7 @@
+ #include <mm/core_memprot.h>
+ #include <stdint.h>
+ #include <string.h>
++#include <string_ext.h>
+ #include <tee/cache.h>
+ #include <tee_api_defines.h>
+ #include <trace.h>
+@@ -691,6 +692,7 @@ enum caam_status caam_key_black_encapsulation(struct caamkey *key,
+ 	cache_operation(TEE_CACHEFLUSH, input_buf.data, input_buf.length);
+ 
+ 	/* Re-allocate the output key for black format */
++	memzero_explicit(key->buf.data, key->buf.length);
+ 	caam_key_free(key);
+ 	key->key_type = key_type;
+ 
+@@ -747,6 +749,9 @@ enum caam_status caam_key_black_encapsulation(struct caamkey *key,
+ 	caam_key_dump("Output Key", key);
+ 
+ out:
++	/* The plain key must not outlive the operation */
++	if (input_buf.data)
++		memzero_explicit(input_buf.data, input_buf.length);
+ 	caam_free_buf(&input_buf);
+ 	caam_free_desc(&desc);
+ 
+-- 
+2.25.1
+

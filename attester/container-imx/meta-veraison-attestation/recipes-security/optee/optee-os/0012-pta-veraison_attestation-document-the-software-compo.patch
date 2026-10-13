@@ -1,0 +1,93 @@
+From 6b7ced6bf34dbac37a082ae9e9fe6f5117c3ebab Mon Sep 17 00:00:00 2001
+From: Yuichi Sugiyama <yuichis@ricsec.co.jp>
+Date: Mon, 12 Oct 2026 12:40:27 +0000
+Subject: [PATCH] pta: veraison_attestation: document the software
+ components
+
+Describe the two components, how the TEE core value can be computed
+from tee.elf, where the signer-id of each comes from, and what the
+self-measurement does and does not give.
+
+Upstream-Status: Pending
+Signed-off-by: Yuichi Sugiyama <yuichis@ricsec.co.jp>
+---
+ core/pta/veraison_attestation/README.md | 58 +++++++++++++++++--------
+ 1 file changed, 40 insertions(+), 18 deletions(-)
+
+diff --git a/core/pta/veraison_attestation/README.md b/core/pta/veraison_attestation/README.md
+index d34e13c..6029194 100644
+--- a/core/pta/veraison_attestation/README.md
++++ b/core/pta/veraison_attestation/README.md
+@@ -54,29 +54,51 @@ provisioning", a closed device is "secured" and a closed device put in the
+ field return state is "decommissioned". The boot signer is the SRK hash,
+ in the byte order of the `srktool` efuse file.
+ 
+-## Software component
+-
+-The evidence carries one software component, the calling TA. Its
+-measurement value is the SHA-256 of the read-only memory of the TA. Its
+-signer-id is the SHA-256 of the TA root public key the core verifies TAs
+-against (`ta_pub_key`), over the big-endian modulus followed by the
+-big-endian 32-bit exponent; for a key with the usual exponent 65537 it
+-can be computed from the key file the core was built with:
+-
+-```sh
+-openssl rsa -in keys/default_ta.pem -noout -modulus | cut -d= -f2 | \
+-    tr -d '\n' | sed 's/$/00010001/' | xxd -r -p | sha256sum
+-```
+-
+-An early TA is part of the core image and carries no signature of its
+-own, so its signer-id is the boot signer: the SRK hash with the platform
+-claims, a fixed test value otherwise.
++## Software components
++
++The evidence lists two software components:
++
++- `ARoT`: the calling TA. The measurement value is the SHA-256 of the
++  read-only memory of the TA. The signer-id is the SHA-256 of the TA root
++  public key the core verifies TAs against (`ta_pub_key`), over the
++  big-endian modulus followed by the big-endian 32-bit exponent; for a
++  key with the usual exponent 65537 it can be computed from the key file
++  the core was built with:
++
++  ```sh
++  openssl rsa -in keys/default_ta.pem -noout -modulus | cut -d= -f2 | \
++      tr -d '\n' | sed 's/$/00010001/' | xxd -r -p | sha256sum
++  ```
++
++  An early TA is part of the core image and carries no signature of its
++  own, so its signer-id is the boot signer of the `PRoT` component
++  instead.
++
++- `PRoT`: the TEE core. The measurement value is the SHA-256 of the
++  core's `.text` and `.rodata`, over the same ranges as
++  `PTA_ATTESTATION_HASH_TEE_MEMORY` of the attestation PTA, and the
++  version field is `TEE_IMPL_VERSION` of the build. The value can be
++  computed ahead of time from `tee.elf`: hash the ranges
++  `__text_start..__text_data_start`, `__text_data_end..__text_end`,
++  `__rodata_start..__rodata_end` (plus the `_init` and `_pageable`
++  ranges with `CFG_WITH_PAGER=y`) in that order. Note that the core
++  version string, which the build date is part of, lies in `.rodata`:
++  the value only matches between builds that are reproducible. The
++  signer-id is the hash of the key that signs the boot images: with the
++  platform claims on i.MX 8M the SRK hash from the fuses, in the byte
++  order of the `srktool` efuse file; otherwise a fixed test value.
++
++The core measures itself, so the `PRoT` component does not protect
++against a compromised core (see Known Limitations); what it gives a
++verifier is the identity of the build that secure boot started, so that
++outdated or unexpected builds, which are still correctly signed, can be
++told apart.
+ 
+ ## Known Limitations
+ 
+ 1. **PSA Semantics Limitations:** Although this PTA reuses the PSA token format, many of the relevant properties required by the PSA Security Model (SM) are not met. This can impact the effectiveness and security assumptions typically expected from PSA-based attestation.
+ 
+-2. **Lack of Trust in the PTA:** The attestation evidence produced by the PTA attests to the memory contents of the calling TA, but there is no mechanism to establish trust in the PTA itself from a lower-level entity, such as the bootloader. Without such anchoring to a platform Root of Trust (RoT), the PTA lacks foundational trust, which weakens the overall chain of trust. A signing key the PTA keeps for itself, a CAAM black key on i.MX, and the fuse-derived lifecycle tie the evidence to the device and to its secure boot configuration, but they do not measure the PTA or OP-TEE itself.
++2. **Lack of Trust in the PTA:** The attestation evidence produced by the PTA attests to the memory contents of the calling TA and of the TEE core, but both measurements are taken by the core itself: there is no mechanism to establish trust in the PTA from a lower-level entity, such as the bootloader. Without such anchoring to a platform Root of Trust (RoT), the PTA lacks foundational trust, which weakens the overall chain of trust. A signing key the PTA keeps for itself, a CAAM black key on i.MX, and the fuse-derived lifecycle tie the evidence to the device and to its secure boot configuration, and the evidence is only as trustworthy as the core that secure boot started.
+ 
+ ## References
+ 
+-- 
+2.25.1
+

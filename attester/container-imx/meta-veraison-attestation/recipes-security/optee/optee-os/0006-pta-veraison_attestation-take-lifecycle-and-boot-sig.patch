@@ -1,0 +1,302 @@
+From f4e7989e62e11b9433fec7284347343fbf7dcb78 Mon Sep 17 00:00:00 2001
+From: Yuichi Sugiyama <yuichis@ricsec.co.jp>
+Date: Mon, 12 Oct 2026 12:29:04 +0000
+Subject: [PATCH] pta: veraison_attestation: take lifecycle and boot
+ signer from i.MX fuses
+
+The security lifecycle in the PSA token was a fixed test value, and
+nothing described who signed the boot images. Add
+CFG_VERAISON_ATTESTATION_PTA_PLATFORM_CLAIMS to take both from the
+platform; the only implementation for now is the i.MX 8M family with
+CFG_IMX_OCOTP=y:
+
+- the lifecycle follows the fuses NXP's U-Boot consults to tell whether
+  the HAB secure boot is in force: no SRK hash is "assembly and test",
+  an SRK hash on an open device is "PSA RoT provisioning", a closed
+  device, which only boots signed images, is "secured", and a closed
+  device put in the field return state, which boots anything again, is
+  "decommissioned";
+
+- the boot signer is the SRK hash, the hash of the keys the HAB verifies
+  the boot images against, read from the OCOTP fuses and returned in the
+  byte order of the srktool efuse file (the fuses hold it as
+  little-endian words). The next commit uses it for the TAs that are
+  part of the core image.
+
+The fuse map is the 8M family's, so the option is refused on other
+i.MX parts. Without the option the token is unchanged.
+
+Upstream-Status: Submitted [https://github.com/OP-TEE/optee_os/pull/8109]
+Signed-off-by: Yuichi Sugiyama <yuichis@ricsec.co.jp>
+---
+ core/pta/veraison_attestation/platform.h      |  26 ++++
+ .../pta/veraison_attestation/platform_imx8m.c | 134 ++++++++++++++++++
+ core/pta/veraison_attestation/sub.mk          |   3 +
+ .../veraison_attestation.c                    |  11 +-
+ mk/config.mk                                  |  12 ++
+ 5 files changed, 184 insertions(+), 2 deletions(-)
+ create mode 100644 core/pta/veraison_attestation/platform.h
+ create mode 100644 core/pta/veraison_attestation/platform_imx8m.c
+
+diff --git a/core/pta/veraison_attestation/platform.h b/core/pta/veraison_attestation/platform.h
+new file mode 100644
+index 0000000..99d80c3
+--- /dev/null
++++ b/core/pta/veraison_attestation/platform.h
+@@ -0,0 +1,26 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/*
++ * Copyright 2026 RICSec
++ */
++
++#ifndef PTA_VERAISON_ATTESTATION_PLATFORM_H
++#define PTA_VERAISON_ATTESTATION_PLATFORM_H
++
++#include <stdint.h>
++#include <tee_api_types.h>
++
++#define SIGNER_ID_LEN 32
++
++/*
++ * Platform values of the PSA token. A platform provides them from its
++ * hardware (CFG_VERAISON_ATTESTATION_PTA_PLATFORM_CLAIMS=y); otherwise
++ * the fixed test values are used.
++ */
++
++/* The PSA security lifecycle state of the device */
++TEE_Result platform_get_lifecycle(int *lifecycle);
++
++/* The hash of the key that signs the boot images, SIGNER_ID_LEN bytes */
++TEE_Result platform_get_boot_signer_id(uint8_t signer_id[SIGNER_ID_LEN]);
++
++#endif /* PTA_VERAISON_ATTESTATION_PLATFORM_H */
+diff --git a/core/pta/veraison_attestation/platform_imx8m.c b/core/pta/veraison_attestation/platform_imx8m.c
+new file mode 100644
+index 0000000..6c32123
+--- /dev/null
++++ b/core/pta/veraison_attestation/platform_imx8m.c
+@@ -0,0 +1,134 @@
++// SPDX-License-Identifier: BSD-2-Clause
++/*
++ * Copyright 2026 RICSec
++ */
++
++#include <drivers/imx_ocotp.h>
++#include <stdbool.h>
++#include <util.h>
++
++#include "platform.h"
++
++/*
++ * Fuse map of the i.MX 8M family, the fuses NXP's U-Boot reads to decide
++ * whether the HAB secure boot is in force (arch/arm/mach-imx/hab.c).
++ */
++
++/* SRK hash: OCOTP banks 6 and 7, four words each, 256 bits in total */
++#define OCOTP_SRK_BANK_FIRST	6
++#define OCOTP_SRK_BANK_LAST	7
++#define OCOTP_WORDS_PER_BANK	4
++
++/* SEC_CONFIG[1]: bank 1 word 3 bit 25, set once the device is closed */
++#define OCOTP_SEC_CONFIG_BANK	1
++#define OCOTP_SEC_CONFIG_WORD	3
++#define OCOTP_SEC_CONFIG_CLOSED	BIT32(25)
++
++/*
++ * FIELD_RETURN: bank 8 word 3. On the i.MX 8M Plus the whole word reads
++ * 0x28001405 once field return is set (bit 2 is set at the factory); on
++ * the other 8M parts bit 0 is the field return bit.
++ */
++#define OCOTP_FIELD_RETURN_BANK	8
++#define OCOTP_FIELD_RETURN_WORD	3
++#ifdef CFG_MX8MP
++#define OCOTP_FIELD_RETURN_MASK		0xffffffff
++#define OCOTP_FIELD_RETURN_PATTERN	0x28001405
++#else
++#define OCOTP_FIELD_RETURN_MASK		BIT32(0)
++#define OCOTP_FIELD_RETURN_PATTERN	BIT32(0)
++#endif
++
++/* PSA security lifecycle states */
++#define PSA_LIFECYCLE_ASSEMBLY_AND_TEST		0x1000
++#define PSA_LIFECYCLE_PSA_ROT_PROVISIONING	0x2000
++#define PSA_LIFECYCLE_SECURED			0x3000
++#define PSA_LIFECYCLE_DECOMMISSIONED		0x6000
++
++/*
++ * The fuses hold the SRK hash as little-endian words, so reading the bytes
++ * of each word from the least significant one gives the hash as srktool
++ * writes it to the efuse file.
++ */
++TEE_Result platform_get_boot_signer_id(uint8_t signer_id[SIGNER_ID_LEN])
++{
++	TEE_Result res = TEE_SUCCESS;
++	unsigned int bank = 0;
++	unsigned int word = 0;
++	uint32_t val = 0;
++	size_t i = 0;
++
++	for (bank = OCOTP_SRK_BANK_FIRST; bank <= OCOTP_SRK_BANK_LAST; bank++) {
++		for (word = 0; word < OCOTP_WORDS_PER_BANK; word++) {
++			res = imx_ocotp_read(bank, word, &val);
++			if (res != TEE_SUCCESS)
++				return res;
++
++			signer_id[i++] = val;
++			signer_id[i++] = val >> 8;
++			signer_id[i++] = val >> 16;
++			signer_id[i++] = val >> 24;
++		}
++	}
++
++	return TEE_SUCCESS;
++}
++
++static TEE_Result srk_hash_is_programmed(bool *programmed)
++{
++	uint8_t srk[SIGNER_ID_LEN] = { };
++	TEE_Result res = TEE_SUCCESS;
++	size_t i = 0;
++
++	res = platform_get_boot_signer_id(srk);
++	if (res != TEE_SUCCESS)
++		return res;
++
++	*programmed = false;
++	for (i = 0; i < sizeof(srk); i++)
++		if (srk[i])
++			*programmed = true;
++
++	return TEE_SUCCESS;
++}
++
++/*
++ * The SRK, SEC_CONFIG and FIELD_RETURN fuses say how far the device has
++ * come: no SRK hash means it is still being assembled and tested, an SRK
++ * hash on an open device means the root of trust is being provisioned, a
++ * closed device only boots signed images, and a closed device put in the
++ * field return state has lost that protection for good.
++ */
++TEE_Result platform_get_lifecycle(int *lifecycle)
++{
++	TEE_Result res = TEE_SUCCESS;
++	bool srk_programmed = false;
++	uint32_t sec_config = 0;
++	uint32_t field_return = 0;
++
++	res = srk_hash_is_programmed(&srk_programmed);
++	if (res != TEE_SUCCESS)
++		return res;
++
++	res = imx_ocotp_read(OCOTP_SEC_CONFIG_BANK, OCOTP_SEC_CONFIG_WORD,
++			     &sec_config);
++	if (res != TEE_SUCCESS)
++		return res;
++
++	res = imx_ocotp_read(OCOTP_FIELD_RETURN_BANK, OCOTP_FIELD_RETURN_WORD,
++			     &field_return);
++	if (res != TEE_SUCCESS)
++		return res;
++
++	if (!srk_programmed)
++		*lifecycle = PSA_LIFECYCLE_ASSEMBLY_AND_TEST;
++	else if (!(sec_config & OCOTP_SEC_CONFIG_CLOSED))
++		*lifecycle = PSA_LIFECYCLE_PSA_ROT_PROVISIONING;
++	else if ((field_return & OCOTP_FIELD_RETURN_MASK) ==
++		 OCOTP_FIELD_RETURN_PATTERN)
++		*lifecycle = PSA_LIFECYCLE_DECOMMISSIONED;
++	else
++		*lifecycle = PSA_LIFECYCLE_SECURED;
++
++	return TEE_SUCCESS;
++}
+diff --git a/core/pta/veraison_attestation/sub.mk b/core/pta/veraison_attestation/sub.mk
+index 82d7294..0292d91 100644
+--- a/core/pta/veraison_attestation/sub.mk
++++ b/core/pta/veraison_attestation/sub.mk
+@@ -3,6 +3,9 @@ srcs-$(CFG_VERAISON_ATTESTATION_PTA) += cbor.c
+ srcs-$(CFG_VERAISON_ATTESTATION_PTA) += hash.c
+ srcs-$(CFG_VERAISON_ATTESTATION_PTA) += key.c
+ srcs-$(CFG_VERAISON_ATTESTATION_PTA) += sign.c
++ifeq ($(CFG_VERAISON_ATTESTATION_PTA_PLATFORM_CLAIMS),y)
++srcs-$(CFG_MX8M) += platform_imx8m.c
++endif
+ 
+ cflags-$(CFG_VERAISON_ATTESTATION_PTA) += -Wno-declaration-after-statement
+ cflags-$(CFG_VERAISON_ATTESTATION_PTA) += -Wno-redundant-decls
+diff --git a/core/pta/veraison_attestation/veraison_attestation.c b/core/pta/veraison_attestation/veraison_attestation.c
+index 4454735..1db9190 100644
+--- a/core/pta/veraison_attestation/veraison_attestation.c
++++ b/core/pta/veraison_attestation/veraison_attestation.c
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include <base64.h>
++#include <config.h>
+ #include <kernel/pseudo_ta.h>
+ #include <kernel/ts_manager.h>
+ #include <kernel/user_ta.h>
+@@ -15,6 +16,7 @@
+ #include "cbor.h"
+ #include "hash.h"
+ #include "key.h"
++#include "platform.h"
+ #include "sign.h"
+ 
+ #define PTA_NAME "veraison_attestation.pta"
+@@ -27,7 +29,6 @@
+ #define CLIENT_ID 1
+ #define LIFECYCLE 12288
+ #define MEASURMENT_TYPE "PRoT"
+-#define SIGNER_ID_LEN 32
+ 
+ /* clang-format off */
+ #define SIGNER_ID {                                                \
+@@ -51,7 +52,7 @@ static TEE_Result cmd_get_cbor_evidence(uint32_t param_types,
+ 
+ 	const char eat_profile[] = EAT_PROFILE;
+ 	const int psa_client_id = CLIENT_ID;
+-	const int psa_security_lifecycle = LIFECYCLE;
++	int psa_security_lifecycle = LIFECYCLE;
+ 	const char measurement_type[] = MEASURMENT_TYPE;
+ 	const uint8_t signer_id[SIGNER_ID_LEN] = SIGNER_ID;
+ 	uint8_t psa_instance_id[INSTANCE_ID_LEN] = { };
+@@ -84,6 +85,12 @@ static TEE_Result cmd_get_cbor_evidence(uint32_t param_types,
+ 	if (status != TEE_SUCCESS)
+ 		return status;
+ 
++	if (IS_ENABLED(CFG_VERAISON_ATTESTATION_PTA_PLATFORM_CLAIMS)) {
++		status = platform_get_lifecycle(&psa_security_lifecycle);
++		if (status != TEE_SUCCESS)
++			return status;
++	}
++
+ 	/* Calculate measurement hash of memory */
+ 	status = get_hash_ta_memory(measurement_value);
+ 	if (status != TEE_SUCCESS)
+diff --git a/mk/config.mk b/mk/config.mk
+index f11a261..a950508 100644
+--- a/mk/config.mk
++++ b/mk/config.mk
+@@ -1251,6 +1251,18 @@ $(error "CFG_VERAISON_ATTESTATION_PTA_TEST_KEY=n needs secure storage")
+ endif
+ endif
+ 
++# When enabled, CFG_VERAISON_ATTESTATION_PTA_PLATFORM_CLAIMS takes the
++# security lifecycle and the boot signer of the PSA token from the
++# platform instead of fixed test values. Supported on the i.MX 8M family
++# (CFG_MX8M=y with CFG_IMX_OCOTP=y), where the lifecycle follows the SRK,
++# SEC_CONFIG and FIELD_RETURN fuses and the boot signer is the SRK hash.
++CFG_VERAISON_ATTESTATION_PTA_PLATFORM_CLAIMS ?= n
++ifeq ($(CFG_VERAISON_ATTESTATION_PTA_PLATFORM_CLAIMS),y)
++ifneq ($(call cfg-all-enabled,CFG_MX8M CFG_IMX_OCOTP),y)
++$(error "CFG_VERAISON_ATTESTATION_PTA_PLATFORM_CLAIMS needs an i.MX 8M with CFG_IMX_OCOTP=y")
++endif
++endif
++
+ # CFG_SEMIHOSTING_CONSOLE, when enabled, embeds a semihosting console driver.
+ # When CFG_SEMIHOSTING_CONSOLE_FILE=NULL, OP-TEE console reads/writes
+ # trace messages from/to the debug terminal of the semihosting host computer.
+-- 
+2.25.1
+

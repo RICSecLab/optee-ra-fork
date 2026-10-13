@@ -1,0 +1,38 @@
+From 3e0b914a9fd3ed9f15d3882ee0aa9a9f02a880d9 Mon Sep 17 00:00:00 2001
+From: Yuichi Sugiyama <yuichis@ricsec.co.jp>
+Date: Mon, 12 Oct 2026 12:16:37 +0000
+Subject: [PATCH] pta: veraison_attestation: free the COSE work buffers
+
+encode_cose_evidence() allocates the protected header and the
+to-be-signed structure from mempool_default and only frees them on
+the error paths. Every evidence thus leaked four allocations, two per
+encoding pass, and left the thread holding the pool's recursive mutex,
+so that any other thread needing the pool, bignum arithmetic for
+instance, blocks for good.
+
+Free both buffers once the encoder has copied them.
+
+Upstream-Status: Submitted [https://github.com/OP-TEE/optee_os/pull/8109]
+Signed-off-by: Yuichi Sugiyama <yuichis@ricsec.co.jp>
+---
+ core/pta/veraison_attestation/cbor.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/core/pta/veraison_attestation/cbor.c b/core/pta/veraison_attestation/cbor.c
+index e5dfbd9..e77051c 100644
+--- a/core/pta/veraison_attestation/cbor.c
++++ b/core/pta/veraison_attestation/cbor.c
+@@ -242,6 +242,10 @@ static void encode_cose_evidence(QCBOREncodeContext *context,
+ 
+ 	/* Close top level array for COSE_Sign1 */
+ 	QCBOREncode_CloseArray(context);
++
++	/* The encoder copied both buffers */
++	mempool_free(mempool_default, (void *)tbs_payload.ptr);
++	mempool_free(mempool_default, (void *)protected_header.ptr);
+ }
+ 
+ static void encode_cbor_evidence_wrapper(QCBOREncodeContext *context,
+-- 
+2.25.1
+
