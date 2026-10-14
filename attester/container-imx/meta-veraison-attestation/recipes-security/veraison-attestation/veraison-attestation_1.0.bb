@@ -22,6 +22,10 @@ S = "${WORKDIR}/src"
 TA_DEV_KIT_DIR = "${STAGING_INCDIR}/optee/export-user_ta"
 TEEC_EXPORT = "${STAGING_DIR_HOST}${prefix}"
 
+# PSA implementation-id the TA reports (32 bytes); the provisioning data for
+# i.MX (provisoning/data/comid-psa-*-imx.json) carries this value
+CFG_RA_IMPLEMENTATION_ID ?= "imx8mp-optee-ra-0000000000000001"
+
 # Performance measurement logging in the TA (set "y" in local.conf, together
 # with the optee-os flag; see optee-os_%.imx.bbappend)
 CFG_REMOTE_ATTESTATION_PERF ?= "n"
@@ -100,6 +104,7 @@ do_compile() {
         TA_DEV_KIT_DIR=${TA_DEV_KIT_DIR} \
         CROSS_COMPILE=${HOST_PREFIX} \
         LIBGCC_LOCATE_CFLAGS="--sysroot=${STAGING_DIR_HOST}" \
+        CFG_RA_IMPLEMENTATION_ID=${CFG_RA_IMPLEMENTATION_ID} \
         CFG_REMOTE_ATTESTATION_PERF=${CFG_REMOTE_ATTESTATION_PERF}
 
     # Build host application

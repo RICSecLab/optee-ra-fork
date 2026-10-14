@@ -4,8 +4,7 @@
 #include <inttypes.h>
 #include <string.h>
 
-#include <pta_attestation.h>
-#include <pta_remote_attestation.h>
+#include <pta_veraison_attestation.h>
 #include <remote_attestation_ta.h>
 
 #ifdef CFG_REMOTE_ATTESTATION_PERF
@@ -31,10 +30,13 @@ static const char *ra_perf_keymode(size_t packed_key_len) {
 }
 #endif
 
+/* The implementation-id claim, 32 bytes without the terminating NUL */
+static const char implementation_id[] = RA_IMPLEMENTATION_ID;
+
 TEE_Result call_pta_for_cbor_evidence(uint32_t param_types,
                                       TEE_Param params[4]) {
     TEE_TASessionHandle sess = TEE_HANDLE_NULL;
-    TEE_UUID att_uuid = PTA_REMOTE_ATTESTATION_UUID;
+    TEE_UUID att_uuid = PTA_VERAISON_ATTESTATION_UUID;
     TEE_Result res = TEE_ERROR_GENERIC;
     uint32_t ret_orig = 0;
     uint8_t *nonce_buf = NULL;
@@ -109,9 +111,6 @@ TEE_Result call_pta_for_cbor_evidence(uint32_t param_types,
         goto cleanup_return;
     }
 
-    /* Send our TA UUID to PTA for client-id derivation */
-    TEE_UUID ta_uuid = TA_REMOTE_ATTESTATION_UUID;
-
     /* Optional key blob from host (packed key now in params[2]) */
     void *key_blob = NULL;
     size_t key_blob_len = 0;
@@ -129,26 +128,26 @@ TEE_Result call_pta_for_cbor_evidence(uint32_t param_types,
         }
     }
 
-    /* Forward params to PTA */
+    /* Forward params to PTA: nonce, evidence, implementation-id, key */
     uint32_t pta_param_types;
     TEE_Param pta_params[4] = {{.memref.buffer = nonce_buf,
                                 .memref.size = nonce_len},
                                {.memref.buffer = out_buf,
                                 .memref.size = out_len},
-                               {.memref.buffer = &ta_uuid,
-                                .memref.size = sizeof(ta_uuid)},
+                               {.memref.buffer = (void *)implementation_id,
+                                .memref.size = sizeof(implementation_id) - 1},
                                {.memref.buffer = NULL, .memref.size = 0}};
 
     if (key_blob && key_blob_len > 0) {
         pta_params[3].memref.buffer = key_blob;
         pta_params[3].memref.size = key_blob_len;
         pta_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
-                                          TEE_PARAM_TYPE_MEMREF_INOUT,
+                                          TEE_PARAM_TYPE_MEMREF_OUTPUT,
                                           TEE_PARAM_TYPE_MEMREF_INPUT,
                                           TEE_PARAM_TYPE_MEMREF_INPUT);
     } else {
         pta_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
-                                          TEE_PARAM_TYPE_MEMREF_INOUT,
+                                          TEE_PARAM_TYPE_MEMREF_OUTPUT,
                                           TEE_PARAM_TYPE_MEMREF_INPUT,
                                           TEE_PARAM_TYPE_NONE);
     }
@@ -157,7 +156,7 @@ TEE_Result call_pta_for_cbor_evidence(uint32_t param_types,
     perf_invoke_start = ra_perf_now_us();
 #endif
     res = TEE_InvokeTACommand(sess, TEE_TIMEOUT_INFINITE,
-                              PTA_REMOTE_ATTESTATION_GET_CBOR_EVIDENCE,
+                              PTA_VERAISON_ATTESTATION_GET_CBOR_EVIDENCE,
                               pta_param_types, pta_params, &ret_orig);
 #ifdef CFG_REMOTE_ATTESTATION_PERF
     perf_invoke_us = ra_perf_now_us() - perf_invoke_start;
@@ -241,14 +240,14 @@ TEE_Result TA_InvokeCommandEntryPoint(void __unused *sess_ctx, uint32_t cmd_id,
             return TEE_ERROR_BAD_PARAMETERS;
 
         TEE_TASessionHandle sess = TEE_HANDLE_NULL;
-        TEE_UUID att_uuid = PTA_REMOTE_ATTESTATION_UUID;
+        TEE_UUID att_uuid = PTA_VERAISON_ATTESTATION_UUID;
         uint32_t ret_orig = 0;
         TEE_Result res = TEE_OpenTASession(&att_uuid, TEE_TIMEOUT_INFINITE,
                                             0, NULL, &sess, &ret_orig);
         if (res != TEE_SUCCESS)
             return res;
         res = TEE_InvokeTACommand(sess, TEE_TIMEOUT_INFINITE,
-                                   PTA_REMOTE_ATTESTATION_GENERATE_KEYPAIR,
+                                   PTA_VERAISON_ATTESTATION_GENERATE_KEYPAIR,
                                    param_types, params, &ret_orig);
         TEE_CloseTASession(sess);
         return res;
@@ -263,14 +262,14 @@ TEE_Result TA_InvokeCommandEntryPoint(void __unused *sess_ctx, uint32_t cmd_id,
             return TEE_ERROR_BAD_PARAMETERS;
 
         TEE_TASessionHandle sess = TEE_HANDLE_NULL;
-        TEE_UUID att_uuid = PTA_REMOTE_ATTESTATION_UUID;
+        TEE_UUID att_uuid = PTA_VERAISON_ATTESTATION_UUID;
         uint32_t ret_orig = 0;
         TEE_Result res = TEE_OpenTASession(&att_uuid, TEE_TIMEOUT_INFINITE,
                                             0, NULL, &sess, &ret_orig);
         if (res != TEE_SUCCESS)
             return res;
         res = TEE_InvokeTACommand(sess, TEE_TIMEOUT_INFINITE,
-                                   PTA_REMOTE_ATTESTATION_CONVERT_TO_BLACKKEY,
+                                   PTA_VERAISON_ATTESTATION_CONVERT_TO_BLACKKEY,
                                    param_types, params, &ret_orig);
         TEE_CloseTASession(sess);
         return res;

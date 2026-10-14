@@ -28,6 +28,28 @@
 #define PUBKEY_HEADER_SIZE   (PUBKEY_COORD_SIZE + PUBKEY_COORD_SIZE)
 #define MIN_KEY_PARAM_SIZE   (PUBKEY_HEADER_SIZE + 1)
 
+/*
+ * PSA implementation-id the TA reports: identifies the implementation (the
+ * design), not the device. Override with CFG_RA_IMPLEMENTATION_ID at build
+ * time; must be 32 bytes. The default is the QEMU value of the provisioning
+ * data; the i.MX Yocto recipe passes imx8mp-optee-ra-0000000000000001.
+ */
+#ifndef RA_IMPLEMENTATION_ID
+#define RA_IMPLEMENTATION_ID "qemu-optee-ra-000000000000000001"
+#endif
+
+/*
+ * Key commands of the upstream veraison attestation PTA, as in its
+ * pta_veraison_attestation.h. Kept here until the TA dev kit ships a header
+ * that has them.
+ */
+#ifndef PTA_VERAISON_ATTESTATION_GENERATE_KEYPAIR
+#define PTA_VERAISON_ATTESTATION_GENERATE_KEYPAIR 0x1
+#endif
+#ifndef PTA_VERAISON_ATTESTATION_CONVERT_TO_BLACKKEY
+#define PTA_VERAISON_ATTESTATION_CONVERT_TO_BLACKKEY 0x2
+#endif
+
 #if defined(HOST_BUILD)
 typedef TEEC_UUID UUID_TYPE;
 #else
